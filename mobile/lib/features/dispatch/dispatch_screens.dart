@@ -728,6 +728,11 @@ class _StepSheetState extends State<_StepSheet> {
   bool _allowMore = false;
   bool _closeRest = false;
   bool _gapIsShort = false; // deliver: the undelivered part was lost on the way instead of coming back
+  DateTime _day = DateTime.now(); // deliver: the day it was delivered (earlier if entered late)
+
+  static String _ymd(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  bool get _isToday => _ymd(_day) == _ymd(DateTime.now());
 
   static const _titles = {
     'load': 'Record loading',
@@ -858,6 +863,7 @@ class _StepSheetState extends State<_StepSheet> {
           result = await api.post('/delivery-orders/$id/deliver', body: {
             'recipient_name': _recipient.text.trim(),
             'remarks': remarks,
+            'delivered_on': _isToday ? null : _ymd(_day),
             'lines': lines,
             'allow_more': _more.isNotEmpty && _allowMore,
             'close_rest': _less.isNotEmpty && _closeRest,
@@ -925,6 +931,25 @@ class _StepSheetState extends State<_StepSheet> {
                   DropdownMenuItem<String?>(value: d['id'] as String, child: Text('${d['name']} · ${d['phone']}')),
               ],
               onChanged: (v) => setState(() => _driverId = v),
+            ),
+          if (step == 'deliver')
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.event_outlined),
+              title: Text(_isToday ? 'Delivered today' : 'Delivered on ${_day.day}/${_day.month}/${_day.year}',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(_isToday ? 'Tap to pick an earlier day' : 'The sale and Tally voucher use this date'),
+              trailing: const Icon(Icons.edit_calendar_outlined),
+              onTap: () async {
+                final now = DateTime.now();
+                final d = await showDatePicker(
+                    context: context,
+                    initialDate: _day,
+                    firstDate: now.subtract(const Duration(days: 365)),
+                    lastDate: now,
+                    helpText: 'Delivered on');
+                if (d != null) setState(() => _day = d);
+              },
             ),
           if (step == 'deliver')
             TextField(controller: _recipient, decoration: const InputDecoration(labelText: 'Received by')),

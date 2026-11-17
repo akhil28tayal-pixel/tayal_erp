@@ -80,6 +80,8 @@ class DeliverIn(BaseModel):
     recipient_phone: str | None = Field(default=None, max_length=20)
     lines: list[PodLineIn] = Field(default_factory=list, description="Empty = everything delivered")
     remarks: str | None = Field(default=None, max_length=1000)
+    delivered_on: date | None = Field(default=None, description="Day it was delivered, for a delivery recorded "
+                                                                 "later (default today; not in the future)")
     allow_more: bool = Field(default=False, description="The truck carried more than was recorded as sent: the extra "
                                                          "counts as sent, and the order line is increased if needed")
     close_rest: bool = Field(default=False, description="What is left on these order lines (including anything that "

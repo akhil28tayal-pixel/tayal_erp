@@ -102,7 +102,7 @@ export function PlanDispatch({ order, open, onClose, onDone }: {
   const [vehicleId, setVehicleId] = useState("");
   const [driverId, setDriverId] = useState("");
   const [sendNow, setSendNow] = useState(canSend);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
   const [remarks, setRemarks] = useState("");
   const [override, setOverride] = useState("");
   const [qty, setQty] = useState<Record<string, string>>({});

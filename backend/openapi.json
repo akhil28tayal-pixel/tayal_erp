@@ -13511,6 +13511,19 @@
             ],
             "title": "Remarks"
           },
+          "delivered_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered On",
+            "description": "Day it was delivered, for a delivery recorded later (default today; not in the future)"
+          },
           "allow_more": {
             "type": "boolean",
             "title": "Allow More",

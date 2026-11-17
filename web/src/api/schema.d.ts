@@ -3332,6 +3332,11 @@ export interface components {
             /** Remarks */
             remarks?: string | null;
             /**
+             * Delivered On
+             * @description Day it was delivered, for a delivery recorded later (default today; not in the future)
+             */
+            delivered_on?: string | null;
+            /**
              * Allow More
              * @description The truck carried more than was recorded as sent: the extra counts as sent, and the order line is increased if needed
              * @default false

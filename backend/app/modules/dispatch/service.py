@@ -2,7 +2,9 @@
 order line's frozen factor, so a DO can never drift from what was sold."""
 
 import uuid
+from datetime import datetime, time
 from decimal import ROUND_HALF_UP, Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -17,6 +19,7 @@ from app.modules.orders import service as orders
 from app.modules.orders.models import OPEN_FULFILMENT, SalesOrder, SalesOrderItem
 from app.modules.platform.settings import get_setting
 
+IST = ZoneInfo("Asia/Kolkata")
 ZERO = Decimal("0")
 BASE = Decimal("0.000001")
 QTY = Decimal("0.001")
@@ -438,7 +441,10 @@ def dispatch(db: Session, ctx: Ctx, do: DeliveryOrder, body) -> SalesOrder:
         total += base
     if total == 0:
         raise AppError(422, "NOTHING_TO_DISPATCH", "Nothing is being dispatched. Cancel the delivery order instead.")
-    do.status, do.dispatched_at = "DISPATCHED", orders.now()
+    now = orders.now()
+    do.status, do.dispatched_at = "DISPATCHED", now
+    if do.dispatch_date < now.astimezone(IST).date():  # sent out on an earlier day, entered late
+        do.dispatched_at = datetime.combine(do.dispatch_date, time(9), IST)
     do.version += 1
     if do.vehicle_id:
         db.get(Vehicle, do.vehicle_id).status = "ON_TRIP"
@@ -472,9 +478,26 @@ def _free_vehicle(db: Session, vehicle_id: uuid.UUID | None) -> None:
         v.status = "AVAILABLE"
 
 
+def _delivered_when(do: DeliveryOrder, day) -> datetime:
+    """Now, or noon (IST) of an earlier day for a delivery recorded late. The truck then went out that day at the
+    latest, so its dispatch date and time are moved back if needed (the Tally sale is dated by the delivery)."""
+    now = orders.now()
+    if day is None or day == now.astimezone(IST).date():
+        return now
+    if day > now.astimezone(IST).date():
+        raise AppError(422, "VALIDATION_ERROR", "The delivery date cannot be in the future")
+    when = datetime.combine(day, time(12), IST)
+    if do.dispatch_date > day:
+        do.dispatch_date = day
+    if do.dispatched_at is None or do.dispatched_at > when:
+        do.dispatched_at = datetime.combine(day, time(9), IST)
+    return when
+
+
 def deliver(db: Session, ctx: Ctx, do: DeliveryOrder, body) -> SalesOrder:
     if do.status != "DISPATCHED":
         raise conflict("INVALID_TRANSITION", f"Delivery order is {do.status.lower()}")
+    when = _delivered_when(do, body.delivered_on)
     given = _line_qtys(do, body.lines, "delivered_qty")
     order = db.execute(select(SalesOrder).where(SalesOrder.id == do.sales_order_id).with_for_update()).scalar_one()
     locked = _lock_items(db, [it.order_item_id for it in do.items])
@@ -511,10 +534,11 @@ def deliver(db: Session, ctx: Ctx, do: DeliveryOrder, body) -> SalesOrder:
         oi.qty_delivered_base += d
         complete = complete and s == 0 and dm == 0
     do.status = "DELIVERED" if complete else "PARTIALLY_DELIVERED"
-    do.delivered_at = orders.now()
+    do.delivered_at = when
     do.recipient_name, do.recipient_phone, do.delivery_remarks = body.recipient_name, body.recipient_phone, body.remarks
     do.version += 1
-    _event(db, do, do.status, ctx, f"Received by {body.recipient_name}" + "".join(f" · {c}" for c in changes)
+    late = f" · delivered on {when.astimezone(IST):%d %b %Y}" if when.astimezone(IST).date() != orders.now().astimezone(IST).date() else ""
+    _event(db, do, do.status, ctx, f"Received by {body.recipient_name}" + late + "".join(f" · {c}" for c in changes)
            + (f" · {body.remarks}" if body.remarks else ""))
     db.flush()
     if body.close_rest:

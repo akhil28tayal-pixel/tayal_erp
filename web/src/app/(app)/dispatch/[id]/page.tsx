@@ -127,6 +127,8 @@ function QtyStep({ d, step, onClose, onSaved }: { d: DO; step: "load" | "dispatc
   const [phone, setPhone] = useState("");
   const [remarks, setRemarks] = useState("");
   const [allowMore, setAllowMore] = useState(false);
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const [deliveredOn, setDeliveredOn] = useState(today);
   const [closeRest, setCloseRest] = useState(false);
   const n = (v: string | undefined | null) => Number(v || 0);
   // Deliver: whatever of the sent quantity is not delivered / short / damaged came back with the truck.
@@ -154,6 +156,7 @@ function QtyStep({ d, step, onClose, onSaved }: { d: DO; step: "load" | "dispatc
       if (step === "deliver") {
         return call(api.POST("/api/v1/delivery-orders/{do_id}/deliver", { ...path, body: {
           recipient_name: recipient, recipient_phone: phone || null, remarks: remarks || null,
+          delivered_on: deliveredOn && deliveredOn !== today ? deliveredOn : null,
           allow_more: more.length > 0 && allowMore, close_rest: less.length > 0 && closeRest,
           lines: d.items.map((i) => ({ do_item_id: i.id, delivered_qty: qty[i.id] || "0",
                                        short_qty: bad[i.id]?.short || "0", damaged_qty: bad[i.id]?.damaged || "0",
@@ -202,6 +205,12 @@ function QtyStep({ d, step, onClose, onSaved }: { d: DO; step: "load" | "dispatc
               <option value="">Choose driver</option>
               {drivers.data?.items.filter((x) => x.is_active).map((x) => <option key={x.id} value={x.id}>{x.name} · {x.phone}</option>)}
             </select>
+          </Field>
+        )}
+        {step === "deliver" && (
+          <Field label="Delivered on" hint={deliveredOn !== today ? "An earlier day: the sale, Tally voucher and reports use this date" : "Change it if the delivery was on an earlier day"}>
+            <input type="date" className="input w-48" value={deliveredOn} max={today}
+                   onChange={(e) => setDeliveredOn(e.target.value || today)} />
           </Field>
         )}
         {step === "deliver" && (

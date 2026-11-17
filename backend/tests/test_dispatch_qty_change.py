@@ -105,3 +105,33 @@ def test_less_at_the_gate_keeps_or_closes_the_rest(shop):
     shop.post(shop.ops, f"/delivery-orders/{d['id']}/dispatch", {"lines": line, "close_rest": True})
     o = get(shop, f"/orders/{o['id']}")
     assert o["items"][0]["remaining_qty"] == "0.000" and o["status"] == "DISPATCHED"
+
+
+def test_delivery_recorded_for_an_earlier_day(shop):
+    from datetime import date, timedelta
+
+    o = approved(shop, "100")
+    d = shop.plan(shop.ops, o, "100", send_now=True).json()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    assert deliver(shop, d, delivered_on=tomorrow).status_code == 422
+    two_days_ago = (date.today() - timedelta(days=2)).isoformat()
+    r = deliver(shop, d, delivered_on=two_days_ago)
+    assert r.status_code == 200, r.text
+    x = r.json()
+    assert x["delivered_at"].startswith(two_days_ago) and x["dispatch_date"] == two_days_ago
+    assert x["dispatched_at"] <= x["delivered_at"]
+    # the daily report shows it on that day, not today
+    rep = get(shop, f"/reports/daily?day={two_days_ago}")
+    assert rep["total"]["dealers"] == 1
+    assert get(shop, f"/reports/daily?day={date.today().isoformat()}")["total"]["dealers"] == 0
+
+
+def test_sent_out_on_an_earlier_day(shop):
+    from datetime import date, timedelta
+
+    o = approved(shop, "100")
+    yday = (date.today() - timedelta(days=1)).isoformat()
+    d = shop.plan(shop.ops, o, "100", send_now=True, dispatch_date=yday).json()
+    assert d["dispatched_at"].startswith(yday)
+    r = deliver(shop, d, delivered_on=yday)
+    assert r.json()["delivered_at"].startswith(yday)
