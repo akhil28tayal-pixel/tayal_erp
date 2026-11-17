@@ -1,0 +1,80 @@
+# Local development stack:  docker compose up --build
+name: tayal-erp
+
+x-backend-env: &backend-env
+  ERP_ENV: local
+  ERP_DATABASE_URL: postgresql+psycopg://erp:erp@postgres:5432/tayal_erp
+  ERP_REDIS_URL: redis://redis:6379/0
+  ERP_JWT_SECRET: ${ERP_JWT_SECRET:-local-dev-secret-change-me-0123456789abcdef}
+  ERP_S3_ENDPOINT_URL: http://minio:9000
+  ERP_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+  ERP_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: erp
+      POSTGRES_DB: tayal_erp
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data, ./infrastructure/docker/postgres-init:/docker-entrypoint-initdb.d:ro]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp -d tayal_erp"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [miniodata:/data]
+
+  api:
+    build: ./backend
+    entrypoint: ["./entrypoint.sh"]
+    environment:
+      <<: *backend-env
+      UVICORN_EXTRA: --reload
+    ports: ["8000:8000"]
+    volumes: [./backend:/app]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  worker:
+    build: ./backend
+    command: celery -A app.workers.celery_app worker --loglevel=INFO
+    environment: *backend-env
+    volumes: [./backend:/app]
+    depends_on: [api]
+
+  beat:
+    build: ./backend
+    command: celery -A app.workers.celery_app beat --loglevel=INFO
+    environment: *backend-env
+    volumes: [./backend:/app]
+    depends_on: [api]
+
+  web:
+    build:
+      context: ./web
+      args:
+        API_URL: http://api:8000   # baked into the /api/v1 proxy rewrite at build time
+    ports: ["3000:3000"]
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  miniodata:

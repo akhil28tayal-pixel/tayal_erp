@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launch screen: dark steel with the app icon, matching the app's header colour. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><color android:color="#1C2830" /></item>
+    <item><bitmap android:gravity="center" android:src="@mipmap/ic_launcher" /></item>
+</layer-list>

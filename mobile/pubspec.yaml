@@ -1,0 +1,22 @@
+name: tayal_erp
+description: Tayal ERP field app (sales, collection, godown and driver staff).
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"   # Flutter 3.27 or newer
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  flutter_secure_storage: ^9.2.2
+  url_launcher: ^6.3.0
+  flutter_local_notifications: ^19.0.0   # phone notifications (orders waiting, approved, delivered)
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

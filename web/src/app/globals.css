@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+html, body { background: theme(colors.concrete); color: theme(colors.ink); }
+body { font-family: theme(fontFamily.sans); font-size: 14px; line-height: 1.45; }
+
+/* Semi-expanded width for headings: the one typographic flourish. */
+.display { font-variation-settings: "wdth" 112; letter-spacing: -0.01em; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Blue focus ring everywhere — keyboard users must always see where they are. */
+:focus-visible { outline: 3px solid theme(colors.blue.DEFAULT); outline-offset: 2px; border-radius: 3px; }
+
+@layer components {
+  .btn { @apply inline-flex items-center gap-2 rounded-[5px] px-3.5 h-9 text-[13px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-primary { @apply btn bg-blue text-white hover:bg-blue-dark; }
+  .btn-quiet { @apply btn border border-seam bg-slab text-blue-dark hover:border-blue; }
+  .btn-danger { @apply btn border border-bad/40 bg-slab text-bad hover:bg-bad/5; }
+  .input { @apply h-9 w-full rounded-[5px] border border-seam bg-slab px-3 text-[14px] placeholder:text-steel/70 focus:border-blue; }
+  .label { @apply block text-[12px] font-semibold text-steel mb-1; }
+  .panel { @apply bg-slab border border-seam rounded-[6px]; }
+  .tbl { @apply w-full text-[13.5px]; }
+  .tbl th { @apply text-left font-semibold text-steel text-[12px] px-3 py-2 border-b border-seam bg-[#F5F8FE] sticky top-0; }
+  .tbl td { @apply px-3 py-2.5 border-b border-seam/70 align-middle; }
+  .tbl tbody tr:hover { @apply bg-[#F5F8FE]; }
+}
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

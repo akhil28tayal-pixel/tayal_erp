@@ -1,0 +1,22 @@
+# secrets and data — never in git
+.env
+data/
+backups/
+*.dump
+*.zip
+
+# made on each machine
+.venv/
+tools/
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+node_modules/
+.next/
+build/
+.dart_tool/
+*.tar.gz
+.openapi.tmp.json
+.DS_Store
