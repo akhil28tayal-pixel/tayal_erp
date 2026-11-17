@@ -108,6 +108,8 @@ def backup_due(db: Session, now: datetime) -> bool:
 
 def run_backup() -> JobRun:
     """pg_dump the whole database (custom format, restore with pg_restore) and keep the last N days."""
+    import app.main  # noqa: F401  - loads every table, so this also works when called on its own (update.ps1)
+
     settings = get_settings()
     db = SessionLocal()
     job = JobRun(job="BACKUP", status="RUNNING", started_at=datetime.now(UTC))
