@@ -7,6 +7,8 @@
   python -m app.cli seed-catalog                   brands/products/conversions known so far
   python -m app.cli create-admin --phone 98xxxxxxxx --name "Akhil"   (password from ERP_ADMIN_PASSWORD or prompt)
   python -m app.cli seed-demo                      separate "DEMO Trading Co" with fake dealers — never real data
+  python -m app.cli reset-data --keep-phone 98xxxxxxxx [--keep-masters]
+                                                   wipe the data and start again (backup first; NOT idempotent)
 
 Every command is idempotent: it inserts what is missing and leaves existing rows alone.
 """
@@ -226,6 +228,83 @@ def reset_password(db: Session, phone: str | None) -> None:
     user.failed_logins, user.locked_until, user.is_active = 0, None, True
     revoke_all_sessions(db, user, "password_reset_cli")
     print(f"Password changed for {user.full_name} ({user.phone}). Log in with the phone number and the new password.")
+
+
+# Activity: always wiped by reset-data. Children before parents.
+_ACTIVITY = [
+    "delivery_order_items", "delivery_events", "delivery_orders", "tally_sales", "wa_order_messages",
+    "order_credit_checks", "order_status_history", "sales_order_items", "sales_orders",
+    "direct_truck_items", "direct_trucks", "godown_stock", "stock_snapshots", "tally_sync_runs",
+    "whatsapp_bulk_runs", "dealer_messages", "notifications", "purchase_files", "purchase_posts", "job_runs",
+    "approval_requests", "idempotency_keys", "document_sequences", "audit_logs", "refresh_tokens", "devices",
+]
+# Masters that come from Tally or are typed in: wiped too unless --keep-masters.
+_MASTERS = [
+    "dealer_rates", "dealer_assignments", "dealer_contacts", "dealer_addresses", "dealers",
+    "user_godown_scopes", "godowns", "drivers", "vehicles",
+]
+# Never touched: units, roles and permissions, the company and its settings, brands, products and the Tally item links,
+# inventory owners, transporters (own fleet), purchase profiles, owner sale rules.
+
+
+def reset_data(db: Session, keep_phone: str, keep_masters: bool, yes: bool, no_backup: bool) -> None:
+    """Start again from an empty ERP: every order, truck, message and log is removed, and every user except one
+    super admin. With keep_masters the dealers, godowns, rates, trucks, drivers and staff records stay."""
+    from sqlalchemy import text
+
+    keep = db.execute(select(User).where(User.phone == keep_phone)).scalar_one_or_none()
+    if keep is None:
+        sys.exit(f"no user with phone {keep_phone}; nothing changed")
+    admin = db.execute(select(Role).where(Role.code == "SUPER_ADMIN")).scalar_one()
+    if not db.execute(select(UserRole).where(UserRole.user_id == keep.id, UserRole.role_id == admin.id)).first():
+        sys.exit(f"{keep.full_name} ({keep_phone}) is not a super admin; nothing changed")
+    count = lambda t: db.execute(text(f'select count(*) from "{t}"')).scalar_one()  # noqa: E731
+    users = db.execute(select(User).order_by(User.full_name)).scalars().all()
+    print("This will permanently delete:")
+    for t, label in (("sales_orders", "orders"), ("delivery_orders", "trucks / delivery orders"),
+                     ("direct_trucks", "direct trucks"), ("dealer_messages", "WhatsApp messages"),
+                     ("audit_logs", "log entries")):
+        print(f"  {count(t):>7}  {label}")
+    if not keep_masters:
+        for t, label in (("dealers", "dealers"), ("godowns", "godowns"), ("dealer_rates", "dealer rates"),
+                         ("vehicles", "trucks"), ("drivers", "drivers")):
+            print(f"  {count(t):>7}  {label}")
+    print(f"  {len(users) - 1:>7}  users (everyone except {keep.full_name}, {keep_phone})")
+    print("Kept: " + ("dealers, godowns, rates, trucks, drivers, staff, " if keep_masters else "")
+          + "products, the company, its settings (Tally address, WhatsApp, sync times), roles.")
+    if not yes and input("Type DELETE to go ahead: ").strip() != "DELETE":
+        sys.exit("nothing changed")
+
+    if not no_backup:
+        from app.modules.platform import jobs
+
+        db.rollback()
+        job = jobs.run_backup()
+        if job.status != "SUCCESS":
+            sys.exit(f"backup failed, nothing changed: {job.detail}")
+        print(f"backup: {job.file}")
+
+    others = [u.id for u in users if u.id != keep.id]
+    tables = list(_ACTIVITY)
+    if not keep_masters:
+        tables += _MASTERS
+    for t in tables:
+        db.execute(text(f'delete from "{t}"'))
+    if others:
+        ids = {"ids": others}
+        db.execute(text('delete from user_godown_scopes where user_id = any(:ids)'), ids)
+        db.execute(text('delete from user_roles where user_id = any(:ids)'), ids)
+        if keep_masters:
+            db.execute(text('update drivers set user_id = null where user_id = any(:ids)'), ids)
+        db.execute(text('delete from users where id = any(:ids)'), ids)
+    if not keep_masters:
+        db.execute(text('delete from employees where id is distinct from :e'), {"e": keep.employee_id})
+    keep.failed_logins, keep.locked_until, keep.is_active = 0, None, True
+    db.flush()
+    print("Done. The ERP is empty" + (" except its dealers, godowns, rates, trucks and staff" if keep_masters else "")
+          + f"; sign in as {keep.full_name} ({keep_phone}).")
+    if not keep_masters:
+        print("Next: Overview → Sync from Tally brings dealers, godowns and stock back in.")
 
 
 def seed_demo(db: Session) -> None:
@@ -483,6 +562,11 @@ def main(argv: list[str] | None = None) -> None:
     prb.add_argument("--item", default="SHREE ROC")
     prb.add_argument("--tally-url")
     prb.add_argument("--out", default="tally_debug")
+    rst = sub.add_parser("reset-data", help="wipe orders, trucks, messages, logs and all users but one super admin")
+    rst.add_argument("--keep-phone", required=True, help="the super admin who stays")
+    rst.add_argument("--keep-masters", action="store_true", help="keep dealers, godowns, rates, trucks, drivers, staff")
+    rst.add_argument("--yes", action="store_true", help="don't ask to type DELETE")
+    rst.add_argument("--no-backup", action="store_true", help="skip the backup taken first")
     sub.add_parser("import-purchase-uploader", help="take over the Purchase Uploader app's settings and push log")
     args = parser.parse_args(argv)
 
@@ -511,6 +595,8 @@ def main(argv: list[str] | None = None) -> None:
             sync_tally_masters(db, args.tally_url, args.dry_run, args.save_xml)
         elif args.cmd == "create-admin":
             create_admin(db, args.phone, args.name)
+        elif args.cmd == "reset-data":
+            reset_data(db, args.keep_phone, args.keep_masters, args.yes, args.no_backup)
         elif args.cmd == "reset-password":
             reset_password(db, args.phone)
         elif args.cmd == "tally-stock":

@@ -5,6 +5,7 @@
 #   powershell -ExecutionPolicy Bypass -File .\deploy\windows\tally-autostart.ps1 -Remove
 #
 # Run it as the Windows user who uses Tally on this PC (Tally is a window, so it runs in that user's session).
+# Needs nothing else from this folder.
 # Opening Ishika Traders Daily is a Tally setting: F1 > Settings > Startup > Load companies on startup (see README).
 param(
     [string]$TallyExe = "",
@@ -47,8 +48,18 @@ $TallyExe = (Resolve-Path $TallyExe).Path
 Ok "Tally: $TallyExe"
 
 # ---- the scheduled task: at sign-in (after 1 minute) and every few minutes, start Tally if it isn't running
-$launcher = Join-Path $PSScriptRoot "start-tally.ps1"
-if (-not (Test-Path $launcher)) { Fail "start-tally.ps1 is missing next to this script" }
+# The launcher is written to a fixed place, so this works however this script was started (even pasted in).
+$dir = Join-Path $env:ProgramData "TayalERP"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$launcher = Join-Path $dir "start-tally.ps1"
+@'
+# Starts TallyPrime if it is not already running (run by the "Tayal ERP - Start Tally" scheduled task).
+param([Parameter(Mandatory = $true)][string]$TallyExe)
+if (Get-Process -Name "tally" -ErrorAction SilentlyContinue) { exit 0 }
+if (-not (Test-Path $TallyExe)) { exit 1 }
+Start-Process -FilePath $TallyExe -WorkingDirectory (Split-Path $TallyExe) -WindowStyle Maximized
+'@ | Set-Content -Path $launcher -Encoding UTF8
+Ok "launcher: $launcher"
 $user = "$env:USERDOMAIN\$env:USERNAME"
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$launcher`" -TallyExe `"$TallyExe`""

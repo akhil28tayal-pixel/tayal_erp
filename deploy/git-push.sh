@@ -20,6 +20,8 @@ elif [ -n "$URL" ]; then
 fi
 
 git add -A
+# Files that are now in .gitignore but were sent before: stop tracking them (they stay on this Mac).
+git ls-files -ci --exclude-standard | while IFS= read -r f; do git rm -q --cached -- "$f"; done
 # Safety: stop if a secret or data file slipped in.
 if git diff --cached --name-only | grep -E '(^|/)\.env$|\.dump$|(^|/)backups/' ; then
   echo "STOPPED: the files above must not go to GitHub. Check .gitignore."; git reset -q; exit 1

@@ -20,3 +20,7 @@ build/
 *.tar.gz
 .openapi.tmp.json
 .DS_Store
+
+# not code
+*.egg-info/
+backend/tally_debug/
