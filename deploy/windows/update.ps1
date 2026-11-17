@@ -16,7 +16,7 @@ $Backend = Join-Path $Root "backend"
 $Web = Join-Path $Root "web"
 $nssm = Join-Path $Root "tools\nssm.exe"
 function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Cyan }
-function Fail($t) { Write-Host "STOPPED: $t" -ForegroundColor Red; Write-Host "Starting the old version again."; & $nssm start TayalERP-API | Out-Null; & $nssm start TayalERP-Web | Out-Null; exit 1 }
+function Fail($t) { Write-Host "STOPPED: $t" -ForegroundColor Red; Write-Host "Starting the old version again."; cmd /c "`"$nssm`" start TayalERP-API >nul 2>&1"; cmd /c "`"$nssm`" start TayalERP-Web >nul 2>&1"; exit 1 }
 $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 
 if (Test-Path (Join-Path $Root ".git")) {
@@ -38,9 +38,25 @@ Push-Location $Backend
 & $py -c "from app.modules.platform import jobs; j = jobs.run_backup(); print(j.status, j.file or j.detail)"
 Pop-Location
 
+# Stop a service and make sure it really stopped (a service that keeps crashing and restarting can refuse a normal
+# stop with "cannot accept control messages"); if it won't, end its processes.
+function Stop-Erp($name) {
+    cmd /c "`"$nssm`" stop $name >nul 2>&1"
+    for ($i = 0; $i -lt 30; $i++) {
+        $s = Get-Service $name -ErrorAction SilentlyContinue
+        if (-not $s -or $s.Status -eq "Stopped") { Write-Host "  $name stopped"; return }
+        Start-Sleep -Seconds 1
+        if ($i -eq 10) { cmd /c "`"$nssm`" stop $name >nul 2>&1" }
+    }
+    $svcPid = (Get-CimInstance Win32_Service -Filter "Name='$name'").ProcessId
+    if ($svcPid) { cmd /c "taskkill /PID $svcPid /T /F >nul 2>&1" }
+    Start-Sleep -Seconds 2
+    Write-Host "  $name stopped (forced)"
+}
+
 Step "Stopping"
-& $nssm stop TayalERP-Web | Out-Null
-& $nssm stop TayalERP-API | Out-Null
+Stop-Erp "TayalERP-Web"
+Stop-Erp "TayalERP-API"
 
 Step "Server"
 Push-Location $Backend
@@ -65,7 +81,7 @@ try {
 } finally { Pop-Location }
 
 Step "Starting"
-& $nssm start TayalERP-API | Out-Null
-& $nssm start TayalERP-Web | Out-Null
+cmd /c "`"$nssm`" start TayalERP-API >nul 2>&1"
+cmd /c "`"$nssm`" start TayalERP-Web >nul 2>&1"
 Start-Sleep -Seconds 5
 & (Join-Path $PSScriptRoot "status.ps1")
