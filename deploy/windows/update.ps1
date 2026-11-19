@@ -10,6 +10,7 @@
   It takes a backup first, then updates the server, the database tables and the web dashboard, and restarts.
 #>
 #Requires -RunAsAdministrator
+param([switch]$NoPull)
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $Backend = Join-Path $Root "backend"
@@ -19,8 +20,9 @@ function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Cyan }
 function Fail($t) { Write-Host "STOPPED: $t" -ForegroundColor Red; Write-Host "Starting the old version again."; cmd /c "`"$nssm`" start TayalERP-API >nul 2>&1"; cmd /c "`"$nssm`" start TayalERP-Web >nul 2>&1"; exit 1 }
 $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 
-if (Test-Path (Join-Path $Root ".git")) {
+if ((Test-Path (Join-Path $Root ".git")) -and -not $NoPull) {
     Step "Latest version from GitHub"
+    $me = (Get-FileHash $PSCommandPath).Hash
     Push-Location $Root
     $before = git rev-parse --short HEAD
     git fetch origin main
@@ -30,6 +32,10 @@ if (Test-Path (Join-Path $Root ".git")) {
     if ($before -eq $after) { Write-Host "Already the latest ($after); updating anyway." }
     else { git log --format="  %h %s" "$before..$after" }
     Pop-Location
+    if ((Get-FileHash $PSCommandPath).Hash -ne $me) {  # this script itself changed: carry on with the new one
+        & $PSCommandPath -NoPull
+        exit $LASTEXITCODE
+    }
 }
 
 Step "Backup before updating"
@@ -41,12 +47,13 @@ Pop-Location
 # Stop a service and make sure it really stopped (a service that keeps crashing and restarting can refuse a normal
 # stop with "cannot accept control messages"); if it won't, end its processes.
 function Stop-Erp($name) {
-    cmd /c "`"$nssm`" stop $name >nul 2>&1"
-    for ($i = 0; $i -lt 30; $i++) {
+    $s = Get-Service $name -ErrorAction SilentlyContinue
+    if (-not $s -or $s.Status -eq "Stopped") { Write-Host "  $name already stopped"; return }
+    cmd /c "sc.exe stop $name >nul 2>&1"   # asks and returns at once (nssm stop can wait a long time)
+    for ($i = 0; $i -lt 20; $i++) {
         $s = Get-Service $name -ErrorAction SilentlyContinue
         if (-not $s -or $s.Status -eq "Stopped") { Write-Host "  $name stopped"; return }
         Start-Sleep -Seconds 1
-        if ($i -eq 10) { cmd /c "`"$nssm`" stop $name >nul 2>&1" }
     }
     $svcPid = (Get-CimInstance Win32_Service -Filter "Name='$name'").ProcessId
     if ($svcPid) { cmd /c "taskkill /PID $svcPid /T /F >nul 2>&1" }

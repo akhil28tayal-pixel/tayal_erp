@@ -7,6 +7,9 @@
   python -m app.cli seed-catalog                   brands/products/conversions known so far
   python -m app.cli create-admin --phone 98xxxxxxxx --name "Akhil"   (password from ERP_ADMIN_PASSWORD or prompt)
   python -m app.cli seed-demo                      separate "DEMO Trading Co" with fake dealers — never real data
+  python -m app.cli export-dealer-contacts [--file dealer_mobiles.json]
+  python -m app.cli import-dealer-contacts --file dealer_mobiles.json [--dry-run]
+                                                   copy dealers' mobile numbers from one ERP to another
   python -m app.cli reset-data --keep-phone 98xxxxxxxx [--keep-masters]
                                                    wipe the data and start again (backup first; NOT idempotent)
 
@@ -31,6 +34,8 @@ from app.modules.masters.models import (
     Brand,
     Company,
     CompanyProduct,
+    Dealer,
+    DealerContact,
     Employee,
     InventoryOwner,
     Product,
@@ -307,6 +312,82 @@ def reset_data(db: Session, keep_phone: str, keep_masters: bool, yes: bool, no_b
         print("Next: Overview → Sync from Tally brings dealers, godowns and stock back in.")
 
 
+def export_dealer_contacts(db: Session, path: str) -> None:
+    """Write every dealer's saved mobile numbers (Dealers → contacts) to a JSON file, with what identifies the dealer
+    in Tally, so import-dealer-contacts can put them on the same dealers in another copy of the ERP."""
+    import json
+
+    rows = db.execute(select(Dealer, DealerContact).join(DealerContact, DealerContact.dealer_id == Dealer.id)
+                      .order_by(Dealer.name, DealerContact.is_primary.desc())).all()
+    out = [{"dealer": d.name, "code": d.code, "tally_ledger_name": d.tally_ledger_name,
+            "tally_ledger_guid": d.tally_ledger_guid, "name": c.name, "phone": c.phone, "role": c.role,
+            "is_primary": c.is_primary, "whatsapp_opt_in": c.whatsapp_opt_in} for d, c in rows]
+    # The ledger's Mobile No. from Tally too, in case the other copy's Tally doesn't have it.
+    for d in db.execute(select(Dealer).where(Dealer.tally_mobile.is_not(None)).order_by(Dealer.name)).scalars():
+        out.append({"dealer": d.name, "code": d.code, "tally_ledger_name": d.tally_ledger_name,
+                    "tally_ledger_guid": d.tally_ledger_guid, "name": d.tally_contact_name or d.name,
+                    "phone": d.tally_mobile, "role": "Tally mobile", "is_primary": False, "whatsapp_opt_in": False,
+                    "from_tally": True})
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"kind": "tayal-erp-dealer-contacts", "contacts": out}, f, ensure_ascii=False, indent=1)
+    print(f"{len(out)} numbers of {len({r['code'] for r in out})} dealers written to {os.path.abspath(path)}")
+
+
+def import_dealer_contacts(db: Session, path: str, dry_run: bool) -> None:
+    """Add the numbers from export-dealer-contacts to the matching dealers here. A dealer is matched by its Tally
+    ledger (GUID, then name), then by name, then by code. Numbers a dealer already has are skipped; an imported
+    primary number only becomes primary if the dealer has none yet."""
+    import json
+
+    from app.modules.collections.service import normalize_mobile
+
+    with open(path, encoding="utf-8-sig") as f:
+        data = json.load(f)
+    if data.get("kind") != "tayal-erp-dealer-contacts":
+        sys.exit("this is not a file from export-dealer-contacts")
+    dealers = db.execute(select(Dealer)).scalars().all()
+    low = lambda v: (v or "").strip().lower()  # noqa: E731
+    by = {k: {} for k in ("guid", "ledger", "name", "code")}
+    for d in dealers:
+        for k, v in (("guid", d.tally_ledger_guid), ("ledger", low(d.tally_ledger_name)), ("name", low(d.name)),
+                     ("code", low(d.code))):
+            if v:
+                by[k].setdefault(v, d)
+    added = skipped = 0
+    missing: dict[str, int] = {}
+    for r in data["contacts"]:
+        d = (by["guid"].get(r.get("tally_ledger_guid") or "") or by["ledger"].get(low(r.get("tally_ledger_name")))
+             or by["ledger"].get(low(r.get("dealer"))) or by["name"].get(low(r.get("dealer")))
+             or by["name"].get(low(r.get("tally_ledger_name"))) or by["code"].get(low(r.get("code"))))
+        if d is None:
+            missing[r.get("dealer") or "?"] = missing.get(r.get("dealer") or "?", 0) + 1
+            continue
+        mobile = normalize_mobile(r.get("phone"))
+        if not mobile:
+            skipped += 1
+            continue
+        phone = mobile[2:]
+        have = db.execute(select(DealerContact).where(DealerContact.dealer_id == d.id)).scalars().all()
+        if any((c.phone or "")[-10:] == phone for c in have) or (normalize_mobile(d.tally_mobile) or "")[2:] == phone:
+            skipped += 1
+            continue
+        primary = bool(r.get("is_primary")) and not any(c.is_primary for c in have)
+        db.add(DealerContact(dealer_id=d.id, name=(r.get("name") or d.name)[:120], phone=phone,
+                             role=(r.get("role") or None), is_primary=primary or not have,
+                             whatsapp_opt_in=bool(r.get("whatsapp_opt_in"))))
+        db.flush()
+        added += 1
+    print(f"{'Would add' if dry_run else 'Added'} {added} numbers; {skipped} already there or not a mobile number.")
+    if missing:
+        print(f"{sum(missing.values())} numbers not added: no dealer here with the same name or Tally ledger:")
+        for name, n in sorted(missing.items()):
+            print(f"   {name} ({n})")
+        print("Sync dealers from Tally first if these should exist, then run this again (nothing is added twice).")
+    if dry_run:
+        db.rollback()
+        print("Dry run: nothing saved. Run again without --dry-run to save.")
+
+
 def seed_demo(db: Session) -> None:
     """Fake data in its own company. It never touches Ishika Traders Daily."""
     demo = _get_or_create(db, Company, {"code": "DEMO"}, legal_name="DEMO Trading Co (sample data)",
@@ -562,6 +643,11 @@ def main(argv: list[str] | None = None) -> None:
     prb.add_argument("--item", default="SHREE ROC")
     prb.add_argument("--tally-url")
     prb.add_argument("--out", default="tally_debug")
+    exp = sub.add_parser("export-dealer-contacts", help="write dealers' mobile numbers to a file")
+    exp.add_argument("--file", default="dealer_mobiles.json")
+    imp = sub.add_parser("import-dealer-contacts", help="add dealers' mobile numbers from export-dealer-contacts")
+    imp.add_argument("--file", required=True)
+    imp.add_argument("--dry-run", action="store_true", help="show what would be added, save nothing")
     rst = sub.add_parser("reset-data", help="wipe orders, trucks, messages, logs and all users but one super admin")
     rst.add_argument("--keep-phone", required=True, help="the super admin who stays")
     rst.add_argument("--keep-masters", action="store_true", help="keep dealers, godowns, rates, trucks, drivers, staff")
@@ -595,6 +681,10 @@ def main(argv: list[str] | None = None) -> None:
             sync_tally_masters(db, args.tally_url, args.dry_run, args.save_xml)
         elif args.cmd == "create-admin":
             create_admin(db, args.phone, args.name)
+        elif args.cmd == "export-dealer-contacts":
+            export_dealer_contacts(db, args.file)
+        elif args.cmd == "import-dealer-contacts":
+            import_dealer_contacts(db, args.file, args.dry_run)
         elif args.cmd == "reset-data":
             reset_data(db, args.keep_phone, args.keep_masters, args.yes, args.no_backup)
         elif args.cmd == "reset-password":
