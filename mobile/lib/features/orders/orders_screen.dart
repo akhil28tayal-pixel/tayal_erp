@@ -7,6 +7,7 @@ import '../../core/api.dart';
 import '../../core/offline.dart';
 import '../../core/session.dart';
 import '../../core/ui.dart';
+import '../dealers/new_dealer_screen.dart' show NewDealerScreen;
 import '../dispatch/dispatch_screens.dart';
 import '../extras/extras_screens.dart' show OrderActivity;
 
@@ -353,13 +354,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Future<void> _command(String action, Json order) async {
     final creditHold = order['status'] == 'ON_HOLD' && order['hold_kind'] != 'MANUAL';
     final title = action == 'approve' ? 'Approve' : 'Reject';
+    var changes = <Json>[];
+    if (action == 'approve' && SessionScope.read(context).can('orders.edit_on_approval')) {
+      final c = await Navigator.of(context)
+          .push<List<Json>>(MaterialPageRoute(builder: (_) => ApproveEditScreen(order: order)));
+      if (c == null || !mounted) return;
+      changes = c;
+    }
     final reason = await _askReason(title, required: action == 'reject' || creditHold);
     if (reason == null || !mounted) return;
     setState(() => _busy = true);
     try {
       final api = SessionScope.read(context).api;
       final body = action == 'approve'
-          ? {'reason': reason.isEmpty ? null : reason, 'override_credit': creditHold}
+          ? {'reason': reason.isEmpty ? null : reason, 'override_credit': creditHold, 'lines': changes}
           : {'reason': reason};
       final updated = await api.post('/orders/${widget.orderId}/$action', body: body) as Json;
       if (!mounted) return;
@@ -1165,9 +1173,21 @@ class _DealerPickerState extends State<_DealerPicker> {
   @override
   Widget build(BuildContext context) {
     final all = SessionScope.of(context).can('dealers.view_all');
+    final canAdd = SessionScope.of(context).can('dealers.create');
     return Scaffold(
       backgroundColor: AppColors.concrete,
       appBar: AppBar(title: const Text('Choose dealer')),
+      floatingActionButton: canAdd
+          ? FloatingActionButton.extended(
+              icon: const Icon(Icons.person_add_alt_1_outlined),
+              label: const Text('New dealer'),
+              onPressed: () async {
+                final d = await Navigator.of(context)
+                    .push<Json>(MaterialPageRoute(builder: (_) => NewDealerScreen(startName: _q)));
+                if (d != null && context.mounted) Navigator.of(context).pop(d);
+              },
+            )
+          : null,
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -1378,6 +1398,107 @@ class _OrderListScreenState extends State<OrderListScreen> {
         empty: const EmptyState(icon: Icons.receipt_long_outlined, title: 'No orders here'),
         itemBuilder: (context, o) => OrderCard(order: o, onChanged: _refresh),
       ),
+    );
+  }
+}
+
+
+/// Super admin, before approving: change any line's quantity or rate. Pops with the changed lines (empty when
+/// nothing changed), or null to go back without approving.
+class ApproveEditScreen extends StatefulWidget {
+  const ApproveEditScreen({super.key, required this.order});
+
+  final Json order;
+
+  @override
+  State<ApproveEditScreen> createState() => _ApproveEditScreenState();
+}
+
+class _ApproveEditScreenState extends State<ApproveEditScreen> {
+  late final List<Json> _items = List<Json>.from(widget.order['items'] as List);
+  late final Map<int, TextEditingController> _qty = {
+    for (final i in _items) i['line_no'] as int: TextEditingController(text: _plain(i['qty'])),
+  };
+  late final Map<int, TextEditingController> _rate = {
+    for (final i in _items) i['line_no'] as int: TextEditingController(text: _plain(i['rate'])),
+  };
+
+  static String _plain(Object? v) {
+    final d = double.tryParse('$v') ?? 0;
+    return d == d.roundToDouble() ? d.toStringAsFixed(0) : d.toString();
+  }
+
+  static double _d(Object? v) => double.tryParse('${v ?? ''}'.trim()) ?? 0;
+
+  double _amount(Json i) {
+    final n = i['line_no'] as int;
+    final q0 = _d(i['qty']), r0 = _d(i['rate']);
+    if (q0 == 0 || r0 == 0) return _d(i['amount']);
+    return _d(i['amount']) * (_d(_qty[n]!.text) / q0) * (_d(_rate[n]!.text) / r0);
+  }
+
+  List<Json> get _changes => [
+        for (final i in _items)
+          if ((_d(_qty[i['line_no']]!.text) - _d(i['qty'])).abs() > 0.0005 ||
+              (_d(_rate[i['line_no']]!.text) - _d(i['rate'])).abs() > 0.00005)
+            {'line_no': i['line_no'], 'qty': _qty[i['line_no']]!.text.trim(), 'rate': _rate[i['line_no']]!.text.trim()},
+      ];
+
+  bool get _valid => _items.every((i) => _d(_qty[i['line_no']]!.text) > 0 && _d(_rate[i['line_no']]!.text) > 0);
+
+  @override
+  Widget build(BuildContext context) {
+    final total = _items.fold<double>(0, (t, i) => t + _amount(i));
+    final changed = _changes.isNotEmpty;
+    return Scaffold(
+      backgroundColor: AppColors.concrete,
+      appBar: AppBar(title: Text('Approve ${widget.order['order_no'] ?? ''}')),
+      body: ListView(padding: const EdgeInsets.all(16), children: [
+        Text('${widget.order['dealer_name']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+        Gap.xs,
+        const Text('Change quantity or rate if needed, then approve.', style: TextStyle(color: AppColors.steel)),
+        Gap.m,
+        for (final i in _items)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${i['product_name']}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                Gap.s,
+                Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _qty[i['line_no']],
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(labelText: 'Quantity', suffixText: '${i['uom']}'.toLowerCase()),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _rate[i['line_no']],
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                          labelText: 'Rate ₹', suffixText: '/${'${i['rate_uom']}'.toLowerCase()}'),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                ]),
+                Gap.s,
+                Text('Amount ₹${_amount(i).toStringAsFixed(2)}', style: const TextStyle(color: AppColors.steel)),
+              ]),
+            ),
+          ),
+        Gap.m,
+        Text('Total ₹${total.toStringAsFixed(2)}${changed ? ' (was ₹${widget.order['total_amount']})' : ''}',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+        Gap.l,
+        FilledButton(
+          onPressed: _valid ? () => Navigator.of(context).pop(_changes) : null,
+          child: Text(changed ? 'Save changes and approve' : 'Approve without changes'),
+        ),
+      ]),
     );
   }
 }

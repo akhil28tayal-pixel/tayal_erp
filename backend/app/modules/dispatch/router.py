@@ -169,6 +169,21 @@ def vehicle_loads(ctx: Ctx = Depends(require("dispatch.view")), db: Session = De
              "on_road_dos": road.get(v.id, 0)} for v in vehicles]
 
 
+@router.get("/dispatch/factory-truck-numbers", response_model=list[dict])
+def factory_truck_numbers(q: str | None = Query(default=None, max_length=40), limit: int = Query(default=12, le=50),
+                          ctx: Ctx = Depends(require("dispatch.plan")), db: Session = Depends(get_db)):
+    """Factory truck numbers used before (typed in dispatch or on purchase bills), most recent first, so a
+    returning truck is picked instead of typed again. `q` matches any part of the number (spaces ignored)."""
+    stmt = (select(DirectTruck.truck_no, func.max(DirectTruck.created_at).label("last"), func.count().label("n"))
+            .where(DirectTruck.company_id == ctx.company_id, DirectTruck.truck_no != "")
+            .group_by(DirectTruck.truck_no))
+    if q and q.strip():
+        stmt = stmt.where(DirectTruck.truck_no.ilike(f"%{q.strip().upper().replace(' ', '')}%"))
+    rows = db.execute(stmt.order_by(func.max(DirectTruck.created_at).desc()).limit(limit)).all()
+    return [{"truck_no": r.truck_no, "last_used": r.last.date().isoformat() if r.last else None, "times": r.n}
+            for r in rows]
+
+
 @router.get("/orders/{order_id}/dispatch-options", response_model=DispatchOptionsOut)
 def dispatch_options(order_id: uuid.UUID, ctx: Ctx = Depends(require("dispatch.plan")), db: Session = Depends(get_db)):
     """Where this order can be sent from: each active godown with its stock (as per Tally, less what is already

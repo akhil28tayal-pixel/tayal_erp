@@ -256,7 +256,8 @@ def history(order_id: uuid.UUID, ctx: Ctx = Depends(require("orders.view")), db:
     words = {"submit": "Booked", "auto_approve": "Approved automatically", "approve": "Approved",
              "credit_hold": "Put on hold (credit)", "hold": "Put on hold", "release": "Released from hold",
              "reject": "Rejected", "cancel": "Cancelled", "close": "Closed", "fulfilment": None,
-             "qty_change": "Quantity changed at dispatch", "rest_closed": "Rest of the order closed"}
+             "qty_change": "Quantity changed at dispatch",
+             "edit_on_approval": "Changed while approving", "rest_closed": "Rest of the order closed"}
     status_words = {"PARTIALLY_DISPATCHED": "Partly sent", "DISPATCHED": "All trucks sent",
                     "PARTIALLY_DELIVERED": "Partly delivered", "DELIVERED": "Fully delivered",
                     "ON_HOLD": "On hold", "UNDER_REVIEW": "Waiting for approval"}
@@ -331,8 +332,13 @@ def submit(order_id: uuid.UUID, body: SubmitIn, ctx: Ctx = Depends(require("orde
 def approve(order_id: uuid.UUID, body: ApproveIn, ctx: Ctx = Depends(require("orders.approve")),
             db: Session = Depends(get_db)):
     order = service.get_order(db, ctx, order_id, lock=True)
+    if body.lines:
+        service.edit_at_approval(db, ctx, order, body.lines)
     service.approve(db, ctx, order, body.reason, body.override_credit)
     db.commit()
+    if body.lines:
+        for i in order.items:  # amounts as stored (same number format as everywhere else)
+            db.refresh(i)
     return order_out(db, ctx, order)
 
 

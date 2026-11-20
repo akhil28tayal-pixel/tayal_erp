@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, call } from "@/lib/api";
+import { useDebounced } from "@/lib/hooks";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/lib/auth";
 import { Badge, Drawer, Field, fmtQty } from "@/components/ui";
@@ -107,6 +108,10 @@ export function PlanDispatch({ order, open, onClose, onDone }: {
   const [override, setOverride] = useState("");
   const [qty, setQty] = useState<Record<string, string>>({});
   const [factoryTruck, setFactoryTruck] = useState("");
+  const truckQ = useDebounced(factoryTruck.trim(), 250);
+  // Factory trucks used before: pick one instead of typing the whole number again.
+  const knownTrucks = useQuery({ queryKey: ["factory-trucks", truckQ], enabled: open,
+    queryFn: () => call(api.GET("/api/v1/dispatch/factory-truck-numbers", { params: { query: { q: truckQ || undefined } } })) as Promise<{ truck_no: string; last_used: string | null; times: number }[]> });
   const [allowMore, setAllowMore] = useState(false);
   const [closeRest, setCloseRest] = useState(false);
   const [factoryRef, setFactoryRef] = useState("");
@@ -274,8 +279,17 @@ export function PlanDispatch({ order, open, onClose, onDone }: {
           <div className="space-y-3 rounded-[6px] bg-concrete/60 px-3 py-3">
             <p className="text-[13px]">Direct: the material is on the factory truck and goes straight to {order.dealer_name}.
               {o && o.direct_trucks.some((t) => t.matches) ? " Pick it from the Direct trucks below, or type its number if it isn't listed." : ""}</p>
-            <Field label="Factory truck number"><input className="input num uppercase" placeholder="HR55AB1234" value={factoryTruck}
+            <Field label="Factory truck number"><input className="input num uppercase" placeholder="HR55AB1234" value={factoryTruck} list="factory-trucks" autoComplete="off"
                    onChange={(e) => setFactoryTruck(e.target.value)} /></Field>
+            <datalist id="factory-trucks">{(knownTrucks.data ?? []).map((t) => <option key={t.truck_no} value={t.truck_no} />)}</datalist>
+            {(knownTrucks.data ?? []).length > 0 && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12.5px]">
+                <span className="text-steel">{factoryTruck.trim() ? "Matching" : "Used before"}:</span>
+                {(knownTrucks.data ?? []).slice(0, 8).map((t) => (
+                  <button key={t.truck_no} type="button" onClick={() => setFactoryTruck(t.truck_no)}
+                          className={`num rounded-full border px-2.5 py-0.5 ${factoryTruck.trim().toUpperCase().replace(/\s/g, "") === t.truck_no ? "border-blue bg-blue text-white" : "border-seam hover:border-blue"}`}>
+                    {t.truck_no}</button>))}
+              </div>)}
             <Field label="Factory invoice / SAP reference (optional)"><input className="input" value={factoryRef}
                    onChange={(e) => setFactoryRef(e.target.value)} /></Field>
             <p className="text-[12.5px] text-steel">Sent out as soon as you save; record the delivery when it reaches.</p>

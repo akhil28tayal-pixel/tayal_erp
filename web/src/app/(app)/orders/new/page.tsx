@@ -8,6 +8,8 @@ import { useDebounced } from "@/lib/hooks";
 import { useToast } from "@/components/toast";
 import { Badge, ErrorBox, Field, PageHeader, fmtMoney, fmtQty } from "@/components/ui";
 import { problemMessage } from "@/components/orders";
+import { NewDealerDrawer } from "@/components/new-dealer";
+import { useAuth } from "@/lib/auth";
 
 type Line = { key: number; product_id: string; qty: string; uom: string; rate: string };
 let nextKey = 1;
@@ -38,6 +40,8 @@ function NewOrder() {
   const draftId = params.get("draft");  // check and book a draft (e.g. one made from a WhatsApp message)
   const waId = params.get("wa");  // finish a WhatsApp message the reader was not sure about
   const [dealerQ, setDealerQ] = useState("");
+  const [newDealer, setNewDealer] = useState(false);
+  const { can } = useAuth();
   const [dealerId, setDealerId] = useState(params.get("dealer") ?? "");
   const [addressId, setAddressId] = useState("");
   const [site, setSite] = useState("");
@@ -173,6 +177,10 @@ function NewOrder() {
                     {dealers.isFetchingNextPage ? "Loading…" : "Show more"}</button></li>}
                   {dealerTotal === 0 && <li className="px-2 py-3 text-[13px] text-steel">No dealer found. Sales executives see only their assigned dealers.</li>}
                 </ul>
+                {can("dealers.create") && (
+                  <button className="btn-quiet mt-2 h-9" onClick={() => setNewDealer(true)}>+ New dealer (not in Tally yet)</button>)}
+                <NewDealerDrawer open={newDealer} onClose={() => setNewDealer(false)} startName={dealerQ}
+                                 onMade={(id) => { setDealerId(id); setAddressId(""); }} />
               </>
             ) : (
               <div className="space-y-3">
@@ -180,6 +188,7 @@ function NewOrder() {
                   <div>
                     <div className="font-semibold">{d?.name ?? "…"}</div>
                     <div className="num text-[12.5px] text-steel">{d?.code}{d?.tally_parent_group ? ` · ${d.tally_parent_group}` : ""}</div>
+                    {d?.pending_in_tally && <div className="text-[12px] text-warn">New dealer — not in Tally yet (made at the next Tally sync)</div>}
                   </div>
                   <button className="btn-quiet h-8" onClick={() => { setDealerId(""); setDealerQ(""); }}>Change</button>
                 </div>

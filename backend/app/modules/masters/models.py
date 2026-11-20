@@ -281,7 +281,7 @@ class Dealer(IdMixin, TimestampMixin, CompanyMixin, Base):
         enum_check("status", DEALER_STATUS, "status"),
         enum_check("category", DEALER_CATEGORIES, "category"),
         enum_check("credit_policy", CREDIT_POLICIES, "credit_policy"),
-        enum_check("source", ["TALLY", "DEMO"], "source"),
+        enum_check("source", ["TALLY", "DEMO", "ERP"], "source"),  # ERP: added while booking, then made in Tally
     )
 
     code: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -307,6 +307,8 @@ class Dealer(IdMixin, TimestampMixin, CompanyMixin, Base):
     # Contact details as typed in the Tally ledger (read-only; ERP contacts take priority for messages).
     tally_mobile: Mapped[str | None] = mapped_column(String(100))
     tally_phone: Mapped[str | None] = mapped_column(String(100))
+    tally_state: Mapped[str | None] = mapped_column(String(60))  # for a dealer added in the ERP: made so in Tally
+    tally_pincode: Mapped[str | None] = mapped_column(String(6))
     tally_contact_name: Mapped[str | None] = mapped_column(String(120))
     tally_address: Mapped[str | None] = mapped_column(String(500))
     allowed_overdue_days: Mapped[int | None] = mapped_column(Integer)
@@ -321,6 +323,11 @@ class Dealer(IdMixin, TimestampMixin, CompanyMixin, Base):
 
     contacts: Mapped[list["DealerContact"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
     addresses: Mapped[list["DealerAddress"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
+
+    @property
+    def pending_in_tally(self) -> bool:
+        """Added in the ERP and not yet seen in Tally."""
+        return self.source == "ERP" and self.tally_ledger_guid is None
 
 
 class DealerContact(IdMixin, TimestampMixin, Base):

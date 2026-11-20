@@ -53,6 +53,8 @@ from app.modules.masters.schemas import (
     DealerAddressOut,
     DealerContactIn,
     DealerContactOut,
+    DealerCreate,
+    DealerCreatedOut,
     DealerDetailOut,
     DealerOut,
     DealerRateIn,
@@ -442,6 +444,26 @@ def _get_dealer(db: Session, ctx: Ctx, dealer_id: uuid.UUID) -> Dealer:
     if db.execute(_dealer_visible(select(Dealer.id).where(Dealer.id == dealer_id), ctx)).first() is None:
         raise not_found("Dealer")
     return dealer
+
+
+@router.post("/dealers", response_model=DealerCreatedOut, status_code=201, tags=["dealers"])
+def create_dealer(body: DealerCreate, ctx: Ctx = Depends(require("dealers.create")), db: Session = Depends(get_db)):
+    """Add a dealer that isn't in Tally yet (while booking). It is made as a ledger in Tally too: now if Tally can
+    be reached, otherwise at the next Tally sync."""
+    from app.modules.masters import new_dealer
+
+    dealer, said = new_dealer.create(db, ctx, body)
+    db.commit()
+    db.refresh(dealer)
+    return {"dealer": dealer, "tally": said, "in_tally": said.startswith("Made in Tally")}
+
+
+@router.get("/dealers/tally-groups", response_model=list[str], tags=["dealers"])
+def dealer_tally_groups(ctx: Ctx = Depends(require("dealers.create")), db: Session = Depends(get_db)):
+    """Tally groups a new dealer can go under, most used first."""
+    from app.modules.masters import new_dealer
+
+    return new_dealer.groups(db, ctx.company_id)
 
 
 @router.get("/dealers", response_model=Page[DealerOut], tags=["dealers"])

@@ -54,9 +54,22 @@ def upsert_dealers_from_tally(
             select(Dealer).where(Dealer.company_id == company_id, Dealer.tally_ledger_guid.in_(guids))
         ).scalars()
     }
+    # Dealers added in the ERP while booking: linked to their Tally ledger by name the first time it is seen.
+    made_here = {
+        (d.tally_ledger_name or d.name).strip().lower(): d
+        for d in db.execute(
+            select(Dealer).where(Dealer.company_id == company_id, Dealer.source == "ERP",
+                                 Dealer.tally_ledger_guid.is_(None))
+        ).scalars()
+    }
     synced_at = datetime.now(UTC)
     for lg in ledgers:
         dealer = existing.get(lg.guid)
+        if dealer is None and lg.name.strip().lower() in made_here:
+            dealer = made_here.pop(lg.name.strip().lower())
+            dealer.tally_ledger_guid = lg.guid
+            write_audit(db, action="dealer.linked_to_tally", entity_type="dealers", entity_id=dealer.id,
+                        actor_id=actor_id, company_id=company_id, after={"tally_ledger_guid": lg.guid})
         values = {
             "name": lg.name.strip(),
             "tally_ledger_name": lg.name,
@@ -112,8 +125,8 @@ def mark_missing_dealers(db: Session, company_id: uuid.UUID, present_guids: set[
     Never deleted — their orders and history stay intact."""
     n = 0
     for d in db.execute(
-        select(Dealer).where(Dealer.company_id == company_id, Dealer.source == "TALLY",
-                             Dealer.tally_deleted.is_(False))
+        select(Dealer).where(Dealer.company_id == company_id, Dealer.source.in_(["TALLY", "ERP"]),
+                             Dealer.tally_ledger_guid.is_not(None), Dealer.tally_deleted.is_(False))
     ).scalars():
         if d.tally_ledger_guid not in present_guids:
             before = snapshot(d)

@@ -57,6 +57,12 @@ class _PlanDispatchScreenState extends State<PlanDispatchScreen> {
   final _override = TextEditingController();
   final _factoryTruck = TextEditingController();
   final _factoryRef = TextEditingController();
+  List<String> _knownTrucks = const []; // factory truck numbers used before, most recent first
+
+  List<String> get _truckChoices {
+    final q = _factoryTruck.text.toUpperCase().replaceAll(RegExp(r'\s'), '');
+    return _knownTrucks.where((t) => q.isEmpty || (t.contains(q) && t != q)).take(8).toList();
+  }
   bool _loading = true, _saving = false, _needOverride = false, _refreshing = false;
   String? _error;
 
@@ -89,6 +95,10 @@ class _PlanDispatchScreenState extends State<PlanDispatchScreen> {
 
   Future<void> _load({bool keepChoice = false}) async {
     final api = SessionScope.read(context).api;
+    // Factory trucks typed before: offered as one-tap choices (a failure here never blocks planning).
+    api.get('/dispatch/factory-truck-numbers', query: {'limit': 50}).then((r) {
+      if (mounted) setState(() => _knownTrucks = [for (final t in r as List) '${(t as Json)['truck_no']}']);
+    }).catchError((_) {});
     try {
       final r = await Future.wait([
         api.get('/orders/${widget.order['id']}/dispatch-options'),
@@ -388,7 +398,21 @@ class _PlanDispatchScreenState extends State<PlanDispatchScreen> {
                       controller: _factoryTruck,
                       textCapitalization: TextCapitalization.characters,
                       decoration: const InputDecoration(labelText: 'Truck number', hintText: 'HR55AB1234'),
+                      onChanged: (_) => setState(() {}),
                     ),
+                    if (_truckChoices.isNotEmpty) ...[
+                      Gap.s,
+                      Text(_factoryTruck.text.trim().isEmpty ? 'Used before' : 'Matching',
+                          style: const TextStyle(color: AppColors.steel, fontSize: 12.5)),
+                      Wrap(spacing: 6, runSpacing: 0, children: [
+                        for (final t in _truckChoices)
+                          ActionChip(
+                            label: Text(t),
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => setState(() => _factoryTruck.text = t),
+                          ),
+                      ]),
+                    ],
                     TextField(
                       controller: _factoryRef,
                       decoration: const InputDecoration(labelText: 'Factory invoice / SAP reference (optional)'),

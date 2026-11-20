@@ -400,6 +400,59 @@ def submit_order(db: Session, ctx: Ctx, order: SalesOrder, confirm_duplicate: bo
         _set_status(db, order, "APPROVED", "auto_approve", ctx)
 
 
+def _n(v: Decimal) -> str:
+    return f"{v.normalize():f}"
+
+
+def edit_at_approval(db: Session, ctx: Ctx, order: SalesOrder, changes) -> None:
+    """Super admin: change quantities and rates of an order waiting for approval (before it is approved). The
+    amounts, the order total and the credit check use the new figures; the change is kept in the order history."""
+    if not ctx.has("orders.edit_on_approval"):
+        raise forbidden("Only a super admin can change the order while approving", code="EDIT_NOT_ALLOWED")
+    if order.status not in ("UNDER_REVIEW", "ON_HOLD"):
+        raise conflict("INVALID_TRANSITION", f"Order is {order.status}; only orders waiting for approval can be changed")
+    items = {i.line_no: i for i in order.items}
+    want = {c.line_no: c for c in changes}
+    unknown = sorted(set(want) - set(items))
+    if unknown:
+        raise AppError(422, "VALIDATION_ERROR", f"Line {unknown[0]} is not on this order")
+    dealer = db.get(Dealer, order.dealer_id)
+    notes, lines, kept = [], [], {}
+    for no in sorted(items):
+        i, c = items[no], want.get(no)
+        qty = c.qty if c and c.qty is not None else i.entered_qty
+        rate = c.rate if c and c.rate is not None else i.rate
+        bits = []
+        if qty != i.entered_qty:
+            bits.append(f"qty {_n(i.entered_qty)} → {_n(qty)} {i.entered_uom.lower()}")
+        if rate != i.rate:
+            bits.append(f"rate ₹{_n(i.rate)} → ₹{_n(rate)} /{i.rate_uom.lower()}")
+        if bits:
+            product = db.get(Product, i.product_id)
+            notes.append(f"Line {no} {product.name}: " + ", ".join(bits))
+        else:
+            kept[no] = i.rate_source
+        lines.append((no, OrderLineIn(product_id=i.product_id, qty=qty, uom=i.entered_uom, godown_id=i.godown_id,
+                                      rate=rate, rate_uom=i.rate_uom, remarks=i.remarks)))
+    if not notes:
+        return
+    before = str(order.total_amount)
+    priced = [price_line(db, order.company_id, dealer, no, ln, order.order_date) for no, ln in lines]
+    for pl in priced:
+        pl.rate_source = kept.get(pl.line_no, "APPROVER")
+    order.items.clear()
+    db.flush()  # old lines go before new ones reuse their line numbers
+    write_lines(order, priced)
+    order.version += 1
+    order.updated_by = ctx.user_id
+    db.flush()
+    note = "; ".join(notes) + f". Total ₹{before} → ₹{order.total_amount}"
+    _history(db, order, order.status, "edit_on_approval", ctx.user_id, note)
+    write_audit(db, action="order.edit_on_approval", entity_type="sales_orders", entity_id=order.id,
+                actor_id=ctx.user_id, company_id=order.company_id, after={"changes": notes,
+                                                                         "total": str(order.total_amount)})
+
+
 def approve(db: Session, ctx: Ctx, order: SalesOrder, reason: str | None, override_credit: bool) -> None:
     if order.status not in ("UNDER_REVIEW", "ON_HOLD"):
         raise conflict("INVALID_TRANSITION", f"Order is {order.status}; only orders waiting for approval can be approved")

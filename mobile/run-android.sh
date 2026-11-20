@@ -2,6 +2,8 @@
 # Builds and runs the Tayal ERP Android app from your Mac.
 #   ./run-android.sh          install & run on a phone connected by USB (or an emulator)
 #   ./run-android.sh apk      build an APK you can send to any Android phone
+#   ./run-android.sh publish  build a new version and put it on the ERP server: phones update themselves
+#                             (the app offers "Update" next time it opens; no APK to send around)
 #   ./run-android.sh test     run the app's unit/widget tests on the Mac (needs working Xcode command line tools)
 # Needs Flutter and Android Studio (see README.md in this folder). First run sets up the Android project.
 set -e
@@ -46,28 +48,54 @@ if [ -f "$GRADLE" ] && ! grep -q 'coreLibraryDesugaringEnabled' "$GRADLE"; then
   printf '\ndependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"\n}\n' >> "$GRADLE"
 fi
 
+# FileProvider (in-app updates) needs androidx.core on the app's own classpath
+GRADLE=android/app/build.gradle.kts
+if [ -f "$GRADLE" ] && ! grep -q 'androidx.core:core' "$GRADLE"; then
+  printf '\ndependencies {\n    implementation("androidx.core:core:1.13.1")\n}\n' >> "$GRADLE"
+fi
+GRADLE=android/app/build.gradle
+if [ -f "$GRADLE" ] && ! grep -q 'androidx.core:core' "$GRADLE"; then
+  printf '\ndependencies {\n    implementation "androidx.core:core:1.13.1"\n}\n' >> "$GRADLE"
+fi
+
 # --- "Share → Tayal ERP" for WhatsApp messages (every run; only if not done yet) -------------------
 grep -q 'android.intent.action.SEND"' "$MANIFEST" || \
   perl -0pi -e 's#(</intent-filter>)#$1\n            <intent-filter>\n                <action android:name="android.intent.action.SEND"/>\n                <category android:name="android.intent.category.DEFAULT"/>\n                <data android:mimeType="text/plain"/>\n            </intent-filter>#' "$MANIFEST"
+# --- in-app updates: the app downloads a new build from the ERP server and opens Android's installer -------
+grep -q 'android.permission.REQUEST_INSTALL_PACKAGES' "$MANIFEST" || \
+  perl -0pi -e 's/<application/<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"\/>\n    <application/' "$MANIFEST"
+grep -q 'androidx.core.content.FileProvider' "$MANIFEST" || \
+  perl -0pi -e 's#(</application>)#    <provider\n            android:name="androidx.core.content.FileProvider"\n            android:authorities="\$\{applicationId\}.updates"\n            android:exported="false"\n            android:grantUriPermissions="true">\n            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="\@xml/update_paths"/>\n        </provider>\n    $1#' "$MANIFEST"
+mkdir -p android/app/src/main/res/xml
+cat > android/app/src/main/res/xml/update_paths.xml <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<paths><cache-path name="updates" path="updates/" /></paths>
+XML
+
 ACT=$(find android/app/src/main -name MainActivity.kt | head -1)
-if [ -n "$ACT" ] && ! grep -q 'tayal/share' "$ACT"; then
+if [ -n "$ACT" ] && ! grep -q 'tayal/app' "$ACT"; then
   PKG=$(sed -n 's/^package \(.*\)$/\1/p' "$ACT")
   cat > "$ACT" <<KOTLIN
 package $PKG
 
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
-// Keeps text shared from another app (WhatsApp → Share → Tayal ERP) until the Flutter side asks for it.
 class MainActivity : FlutterActivity() {
     private var shared: String? = null
     private var channel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // Text shared from another app (WhatsApp → Share → Tayal ERP), kept until the Flutter side asks for it.
         val ch = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tayal/share")
         ch.setMethodCallHandler { call, result ->
             if (call.method == "takeShared") {
@@ -78,6 +106,37 @@ class MainActivity : FlutterActivity() {
             }
         }
         channel = ch
+        // App updates: this build's number, where to save a download, and handing a downloaded APK to Android.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tayal/app").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "versionCode" -> {
+                    val info = packageManager.getPackageInfo(packageName, 0)
+                    val code = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+                    result.success(code)
+                }
+                "versionName" -> result.success(packageManager.getPackageInfo(packageName, 0).versionName)
+                "updateDir" -> {
+                    val d = File(cacheDir, "updates")
+                    d.mkdirs()
+                    result.success(d.absolutePath)
+                }
+                "canInstall" -> result.success(Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls())
+                "allowInstall" -> {
+                    startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:\$packageName")))
+                    result.success(null)
+                }
+                "install" -> {
+                    val f = File(call.argument<String>("path")!!)
+                    val uri = FileProvider.getUriForFile(this, "\$packageName.updates", f)
+                    val i = Intent(Intent.ACTION_VIEW)
+                        .setDataAndType(uri, "application/vnd.android.package-archive")
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(i)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -121,6 +180,51 @@ if [ "$1" = "test" ]; then
   echo "==> Running app tests (on the Mac)"
   flutter test
   exit $?
+fi
+
+if [ "$1" = "publish" ]; then
+  SERVER="${TAYAL_SERVER:-https://erp.tayaltraders.co.in}"
+  # Each published build needs a higher build number (the part after + in pubspec.yaml's version).
+  VER=$(python3 - <<'PY'
+import re
+p = "pubspec.yaml"
+s = open(p).read()
+m = re.search(r"^version:\s*([0-9.]+)\+(\d+)\s*$", s, re.M)
+name, code = m.group(1), int(m.group(2)) + 1
+open(p, "w").write(s[:m.start()] + f"version: {name}+{code}" + s[m.end():])
+print(f"{name} {code}")
+PY
+)
+  NAME=${VER% *}; CODE=${VER#* }
+  echo "==> Building version $NAME (build $CODE)"
+  flutter build apk --release
+  APK="$(pwd)/build/app/outputs/flutter-apk/app-release.apk"
+  echo
+  read -r -p "What changed (one line, shown to staff; Enter to skip): " NOTES
+  read -r -p "Your ERP phone number (admin): " PHONE
+  read -r -s -p "Password: " PASS; echo
+  LOGIN=$(PHONE="$PHONE" PASS="$PASS" python3 -c 'import json,os; print(json.dumps({"phone":os.environ["PHONE"],"password":os.environ["PASS"]}))' \
+          | curl -sS -X POST "$SERVER/api/v1/auth/login" -H "Content-Type: application/json" --data-binary @-)
+  TOKEN=$(printf '%s' "$LOGIN" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || true)
+  CO=$(printf '%s' "$LOGIN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["companies"][0]["company_id"])' 2>/dev/null || true)
+  if [ -z "$TOKEN" ] || [ -z "$CO" ]; then
+    echo "Sign-in failed: $(printf '%s' "$LOGIN" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("detail",""))' 2>/dev/null)"
+    echo "The APK is at $APK — you can also publish it from the web: Settings → Phone app (version $NAME, build $CODE)."
+    exit 1
+  fi
+  echo "==> Uploading to $SERVER"
+  OUT=$(curl -sS -X POST "$SERVER/api/v1/app/android" -H "Authorization: Bearer $TOKEN" -H "X-Company-Id: $CO" \
+        -F "file=@$APK;type=application/vnd.android.package-archive" --form-string "version_code=$CODE" \
+        --form-string "version_name=$NAME" --form-string "notes=$NOTES")
+  if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("version_code") else 1)' 2>/dev/null; then
+    echo "==> Published version $NAME (build $CODE). Phones get the update the next time they open the app."
+    echo "    Commit pubspec.yaml (bash deploy/git-push.sh) so the next build number follows on."
+  else
+    echo "Upload failed: $OUT"
+    echo "The APK is at $APK — you can also publish it from the web: Settings → Phone app (version $NAME, build $CODE)."
+    exit 1
+  fi
+  exit 0
 fi
 
 if [ "$1" = "apk" ]; then

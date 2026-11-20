@@ -16,6 +16,7 @@ PERMISSIONS: dict[str, str] = {
     "orders.close": "Close delivered orders",
     "orders.export": "Export orders",
     "orders.self_approval": "Approve own orders",
+    "orders.edit_on_approval": "Change quantity and rate while approving an order",
     # credit
     "credit.view": "See dealer outstanding / credit position",
     "credit.override": "Release credit holds (admin only)",
@@ -63,6 +64,7 @@ PERMISSIONS: dict[str, str] = {
     # masters
     "dealers.view_all": "See all dealers (not only assigned)",
     "dealers.view_contact": "See dealer phone numbers in exports",
+    "dealers.create": "Add a new dealer while booking (also made as a ledger in Tally)",
     "masters.view": "View master data",
     "masters.dealers_manage": "Edit dealer operational data",
     "masters.products_manage": "Manage brands, products, conversions",
@@ -93,7 +95,7 @@ ROLE_DEFAULTS: dict[str, tuple[str, set[str]]] = {
             p
             for p in ALL
             if not p.startswith("scope.")
-            and p not in {"tally.connector_admin", "admin.roles", "payments.unreconcile"}
+            and p not in {"tally.connector_admin", "admin.roles", "payments.unreconcile", "orders.edit_on_approval"}
         },
     ),
     "OPERATIONS_MANAGER": (
@@ -106,7 +108,7 @@ ROLE_DEFAULTS: dict[str, tuple[str, set[str]]] = {
             "inventory.transfer_approve", "inventory.transfer_dispatch", "inventory.transfer_receive",
             "inventory.count", "dispatch.view", "dispatch.plan", "dispatch.load", "dispatch.confirm",
             "dispatch.capacity_override", "dispatch.freight_manage", "dispatch.exception_manage",
-            "delivery.update_status", "delivery.pod", "dealers.view_all", "masters.view",
+            "delivery.update_status", "delivery.pod", "dealers.view_all", "dealers.create", "masters.view",
             "masters.prices_manage", "masters.godowns_manage", "masters.transport_manage", "reports.view",
         },
     ),
@@ -117,7 +119,7 @@ ROLE_DEFAULTS: dict[str, tuple[str, set[str]]] = {
             "collections.view_all", "collections.followup", "collections.promise", "collections.assign",
             "collections.priority_override", "collections.targets", "payments.report", "payments.verify",
             "payments.reconcile", "tally.view", "tally.sync", "tally.map", "dealers.view_all",
-            "dealers.view_contact", "masters.view", "masters.dealers_manage", "reports.view",
+            "dealers.view_contact", "dealers.create", "masters.view", "masters.dealers_manage", "reports.view",
             "reports.financial",
         },
     ),
@@ -125,7 +127,7 @@ ROLE_DEFAULTS: dict[str, tuple[str, set[str]]] = {
         "Sales Executive",
         # Books orders only. The view permissions are what order entry needs: pick an assigned dealer, see
         # their balance, pick a product and check stock. No payments, dispatch or approvals.
-        {"orders.view", "orders.create", "credit.view", "inventory.view", "masters.view"},
+        {"orders.view", "orders.create", "credit.view", "inventory.view", "masters.view", "dealers.create"},
     ),
     "COLLECTION_EXECUTIVE": (
         "Collection Executive",

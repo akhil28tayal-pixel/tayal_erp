@@ -24,3 +24,6 @@ build/
 # not code
 *.egg-info/
 backend/tally_debug/
+
+# published phone app builds (on the server)
+app-releases/

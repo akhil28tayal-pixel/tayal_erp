@@ -7,6 +7,7 @@ import '../../core/offline.dart';
 import '../../core/session.dart';
 import '../../core/share_in.dart';
 import '../../core/ui.dart';
+import '../../core/updater.dart';
 import '../dealers/dealers_screen.dart';
 import '../dispatch/lists_screens.dart';
 import '../extras/extras_screens.dart';
@@ -72,7 +73,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     unawaited(Offline.refreshCaches(s.api));
     // A WhatsApp message shared to the app (Share → Tayal ERP) opens the WhatsApp orders screen with it.
     ShareIn.onShared = _checkShared;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkShared());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkShared();
+      // A newer version of the app published on the server: offer it (once per app start).
+      if (mounted) unawaited(Updater.check(context, s.api));
+    });
   }
 
   Future<void> _checkShared() async {

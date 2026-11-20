@@ -293,3 +293,23 @@ def test_direct_godown_is_offered_and_takes_a_truck_number(shop):
     assert shop.w.client.get(f"{API}/direct-trucks", headers=shop.h(shop.ops)).json() == []
     body["godown_id"] = str(shop.g1.id)
     assert shop.post(shop.ops, "/delivery-orders", body).status_code == 422
+
+
+def test_typed_factory_truck_numbers_are_offered_again(shop):
+    """A factory truck typed once is suggested next time (most recent first), matched on any part of it."""
+    opt = None
+    for bags, truck in (("50", "hr55 ab 1234"), ("60", "UP14CD5678"), ("40", "HR55AB1234")):
+        o = shop.post(shop.ops, f"/orders/{shop.order(shop.sales, bags=bags).json()['id']}/approve", {}).json()
+        opt = opt or shop.w.client.get(f"{API}/orders/{o['id']}/dispatch-options", headers=shop.h(shop.ops)).json()
+        direct = next(g for g in opt["godowns"] if g["name"] == "Direct")
+        r = shop.post(shop.ops, "/delivery-orders", {
+            "sales_order_id": o["id"], "godown_id": direct["godown_id"], "direct_truck_no": truck,
+            "lines": [{"order_item_id": o["items"][0]["id"], "qty": bags}]})
+        assert r.status_code == 201, r.text
+    get = lambda q="": shop.w.client.get(f"{API}/dispatch/factory-truck-numbers?q={q}",  # noqa: E731
+                                         headers=shop.h(shop.ops)).json()
+    allt = get()
+    assert [t["truck_no"] for t in allt] == ["HR55AB1234", "UP14CD5678"] and allt[0]["times"] == 2
+    assert [t["truck_no"] for t in get("1234")] == ["HR55AB1234"]
+    assert [t["truck_no"] for t in get("up 14")] == ["UP14CD5678"]
+    assert shop.w.client.get(f"{API}/dispatch/factory-truck-numbers", headers=shop.h(shop.sales)).status_code == 403

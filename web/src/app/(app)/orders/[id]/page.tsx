@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, call } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { Badge, Drawer, ErrorBox, Field, Loading, PageHeader, fmtMoney, fmtQty } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
 import { DOBadge, OrderBadge, PlanDispatch, ReasonDrawer, fmtDate, fmtTime, problemMessage, type Order } from "@/components/orders";
 
 type Cmd = "hold" | "release" | "reject" | "cancel" | "close";
@@ -169,22 +170,54 @@ function Approve({ order, open, onClose, onDone }: { order: Order; open: boolean
   const toast = useToast();
   const credit = order.status === "ON_HOLD" && order.hold_kind !== "MANUAL";
   const [reason, setReason] = useState("");
+  const editable = useAuth().can("orders.edit_on_approval");
+  const [edit, setEdit] = useState<Record<number, { qty: string; rate: string }>>({});
+  const val = (no: number, k: "qty" | "rate", orig: string) => edit[no]?.[k] ?? String(Number(orig));
+  const setVal = (no: number, k: "qty" | "rate", v: string, i: Order["items"][number]) =>
+    setEdit({ ...edit, [no]: { qty: val(no, "qty", i.qty), rate: val(no, "rate", i.rate), [k]: v } });
+  const changed = order.items.filter((i) => Number(val(i.line_no, "qty", i.qty)) !== Number(i.qty) || Number(val(i.line_no, "rate", i.rate)) !== Number(i.rate));
+  const valid = order.items.every((i) => Number(val(i.line_no, "qty", i.qty)) > 0 && Number(val(i.line_no, "rate", i.rate)) > 0);
+  // the amount scales with quantity and rate (same units), so the new total can be shown before saving
+  const newAmount = (i: Order["items"][number]) => Number(i.amount) * (Number(val(i.line_no, "qty", i.qty)) / Number(i.qty)) * (Number(val(i.line_no, "rate", i.rate)) / Number(i.rate));
+  const newTotal = order.items.reduce((t, i) => t + newAmount(i), 0);
   const m = useMutation({
     mutationFn: () => call(api.POST("/api/v1/orders/{order_id}/approve", { params: { path: { order_id: order.id } },
-      body: { reason: reason || null, override_credit: credit } })),
+      body: { reason: reason || null, override_credit: credit,
+              lines: changed.map((i) => ({ line_no: i.line_no, qty: val(i.line_no, "qty", i.qty), rate: val(i.line_no, "rate", i.rate) })) } })),
     onSuccess: (o) => { onDone(o); onClose(); },
     onError: (e) => { toast("bad", problemMessage(e)); qc.invalidateQueries({ queryKey: ["order", order.id] }); },
   });
   return (
     <Drawer title={`Approve ${order.order_no}`} open={open} onClose={onClose}>
       <div className="space-y-4 text-[13.5px]">
-        <p>{order.dealer_name} · <b className="num">{fmtMoney(order.total_amount)}</b></p>
+        <p>{order.dealer_name} · <b className="num">{fmtMoney(order.total_amount)}</b>
+          {changed.length > 0 && <> → <b className="num text-blue">{fmtMoney(newTotal.toFixed(2))}</b></>}</p>
+        {editable && order.items.length > 0 && (
+          <div>
+            <div className="mb-1 font-semibold">Change before approving (optional)</div>
+            <table className="tbl text-[13px]">
+              <thead><tr><th>Item</th><th className="text-right">Quantity</th><th className="text-right">Rate</th><th className="text-right">Amount</th></tr></thead>
+              <tbody>{order.items.map((i) => (
+                <tr key={i.id}>
+                  <td>{i.product_name}</td>
+                  <td className="text-right"><input className="input num h-8 w-24 text-right" inputMode="decimal" aria-label={`Quantity of ${i.product_name}`}
+                    value={val(i.line_no, "qty", i.qty)} onChange={(e) => setVal(i.line_no, "qty", e.target.value, i)} />
+                    <span className="ml-1 text-steel">{i.uom.toLowerCase()}</span></td>
+                  <td className="text-right"><input className="input num h-8 w-24 text-right" inputMode="decimal" aria-label={`Rate of ${i.product_name}`}
+                    value={val(i.line_no, "rate", i.rate)} onChange={(e) => setVal(i.line_no, "rate", e.target.value, i)} />
+                    <span className="ml-1 text-steel">/{i.rate_uom.toLowerCase()}</span></td>
+                  <td className="num text-right">{valid ? fmtMoney(newAmount(i).toFixed(2)) : "—"}</td>
+                </tr>))}</tbody>
+            </table>
+            {changed.length > 0 && <p className="mt-1 text-[12.5px] text-steel">The change is saved with the order and shown in its history.</p>}
+          </div>)}
         {order.credit_now && <DealerBalance c={order.credit_now} />}
         {credit && <p className="rounded-[6px] border border-bad/30 bg-bad/5 px-3 py-2">This order failed the credit check. Approving it overrides the limit and is recorded against your name.</p>}
         <Field label={credit ? "Reason for the override" : "Note (optional)"}>
           <textarea className="input h-20 py-2" value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
-        <button className="btn-primary" disabled={m.isPending || (credit && reason.trim().length < 3)} onClick={() => m.mutate()}>Approve order</button>
+        <button className="btn-primary" disabled={m.isPending || !valid || (credit && reason.trim().length < 3)} onClick={() => m.mutate()}>
+          {changed.length ? "Save changes and approve" : "Approve order"}</button>
       </div>
     </Drawer>
   );

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
+from app.modules.app_updates.router import router as app_updates_router
 from app.modules.collections.router import router as collections_router
 from app.modules.dispatch.router import router as dispatch_router
 from app.modules.identity.router import auth_router, users_router
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     api.include_router(purchases_router)
     api.include_router(reports_router)
     api.include_router(wa_orders_router)
+    api.include_router(app_updates_router)
     app.include_router(api)
     app.include_router(health_router)
     return app

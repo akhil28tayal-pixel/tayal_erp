@@ -346,6 +346,7 @@ class DealerOut(BaseModel):
     tally_balance_at: datetime | None = None
     tally_mobile: str | None = None
     tally_phone: str | None = None
+    pending_in_tally: bool = False
     tally_contact_name: str | None = None
     tally_address: str | None = None
     allowed_overdue_days: int | None
@@ -358,6 +359,27 @@ class DealerOut(BaseModel):
 class DealerDetailOut(DealerOut):
     contacts: list[DealerContactOut] = []
     addresses: list[DealerAddressOut] = []
+
+
+class DealerCreate(BaseModel):
+    """A dealer that isn't in Tally yet, added while booking. It is also made as a ledger in Tally."""
+
+    name: str = Field(min_length=2, max_length=200, description="As it should appear in Tally")
+    mobile: str | None = Field(default=None, max_length=20)
+    contact_name: str | None = Field(default=None, max_length=120)
+    gstin: str | None = Field(default=None, pattern=r"^\s*([0-9]{2}[A-Za-z0-9]{13})?\s*$")
+    address: str | None = Field(default=None, max_length=300)
+    city: str | None = Field(default=None, max_length=80)
+    state: str | None = Field(default=None, max_length=60, description="Default Delhi")
+    pincode: str | None = Field(default=None, pattern=r"^([0-9]{6})?$")
+    group: str | None = Field(default=None, max_length=200, description="Tally group, default Sundry Debtors")
+    make_in_tally: bool = True
+
+
+class DealerCreatedOut(BaseModel):
+    dealer: "DealerOut"
+    tally: str = Field(description="What happened in Tally, in words")
+    in_tally: bool
 
 
 class DealerUpdate(BaseModel):

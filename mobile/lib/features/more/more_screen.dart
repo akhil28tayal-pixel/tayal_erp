@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api.dart';
 import '../../core/session.dart';
 import '../../core/ui.dart';
+import '../../core/updater.dart';
 import '../home/home_screen.dart';
 
 class MoreScreen extends StatelessWidget {
@@ -113,10 +114,17 @@ class MoreScreen extends StatelessWidget {
             subtitle: Text(s.serverUrl, style: const TextStyle(color: AppColors.steel)),
           ),
           const Divider(indent: 56),
-          const ListTile(
-            leading: Icon(Icons.info_outline, color: AppColors.steel),
-            title: Text('Version'),
-            subtitle: Text('0.1.0', style: TextStyle(color: AppColors.steel)),
+          ListTile(
+            leading: const Icon(Icons.system_update_outlined, color: AppColors.steel),
+            title: const Text('Version · check for update'),
+            subtitle: FutureBuilder<List<Object?>>(
+              future: Future.wait([Updater.versionName(), Updater.buildNumber()]),
+              builder: (_, v) => Text(
+                  v.data == null || v.data![0] == null ? '…' : '${v.data![0]} (build ${v.data![1]})',
+                  style: const TextStyle(color: AppColors.steel)),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Updater.check(context, s.api, manual: true),
           ),
         ]),
       ),

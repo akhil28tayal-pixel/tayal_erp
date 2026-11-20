@@ -739,6 +739,31 @@ export interface paths {
         /** List Dealers */
         get: operations["list_dealers_api_v1_dealers_get"];
         put?: never;
+        /**
+         * Create Dealer
+         * @description Add a dealer that isn't in Tally yet (while booking). It is made as a ledger in Tally too: now if Tally can
+         *     be reached, otherwise at the next Tally sync.
+         */
+        post: operations["create_dealer_api_v1_dealers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dealers/tally-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dealer Tally Groups
+         * @description Tally groups a new dealer can go under, most used first.
+         */
+        get: operations["dealer_tally_groups_api_v1_dealers_tally_groups_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1295,6 +1320,27 @@ export interface paths {
          * @description Each truck with the weight already planned on it, so planners can see what space is left.
          */
         get: operations["vehicle_loads_api_v1_dispatch_vehicles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dispatch/factory-truck-numbers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Factory Truck Numbers
+         * @description Factory truck numbers used before (typed in dispatch or on purchase bills), most recent first, so a
+         *     returning truck is picked instead of typed again. `q` matches any part of the number (spaces ignored).
+         */
+        get: operations["factory_truck_numbers_api_v1_dispatch_factory_truck_numbers_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2204,6 +2250,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/app/android/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Android Latest
+         * @description The newest published build, or null when none has been published.
+         */
+        get: operations["android_latest_api_v1_app_android_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/app/android/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Android Download */
+        get: operations["android_download_api_v1_app_android_download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/app/android": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Android Publish
+         * @description Publish a new build. Its version code (the number after + in pubspec's version) must be higher than the
+         *     one already published, or phones would not see it as an update.
+         */
+        post: operations["android_publish_api_v1_app_android_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -2252,6 +2356,26 @@ export interface components {
              * @default false
              */
             override_credit: boolean;
+            /**
+             * Lines
+             * @description Super admin: change quantity / rate of these lines, then approve
+             */
+            lines?: components["schemas"]["ApproveLineIn"][];
+        };
+        /** ApproveLineIn */
+        ApproveLineIn: {
+            /** Line No */
+            line_no: number;
+            /**
+             * Qty
+             * @description New quantity, in the unit the line was booked in
+             */
+            qty?: number | string | null;
+            /**
+             * Rate
+             * @description New rate, per the line's rate unit
+             */
+            rate?: number | string | null;
         };
         /** AssignmentBulkIn */
         AssignmentBulkIn: {
@@ -2344,6 +2468,17 @@ export interface components {
         BlockIn: {
             /** Reason */
             reason: string;
+        };
+        /** Body_android_publish_api_v1_app_android_post */
+        Body_android_publish_api_v1_app_android_post: {
+            /** File */
+            file: string;
+            /** Version Code */
+            version_code: number;
+            /** Version Name */
+            version_name: string;
+            /** Notes */
+            notes?: string | null;
         };
         /** Body_upload_api_v1_purchases_upload_post */
         Body_upload_api_v1_purchases_upload_post: {
@@ -3098,6 +3233,55 @@ export interface components {
              */
             id: string;
         };
+        /**
+         * DealerCreate
+         * @description A dealer that isn't in Tally yet, added while booking. It is also made as a ledger in Tally.
+         */
+        DealerCreate: {
+            /**
+             * Name
+             * @description As it should appear in Tally
+             */
+            name: string;
+            /** Mobile */
+            mobile?: string | null;
+            /** Contact Name */
+            contact_name?: string | null;
+            /** Gstin */
+            gstin?: string | null;
+            /** Address */
+            address?: string | null;
+            /** City */
+            city?: string | null;
+            /**
+             * State
+             * @description Default Delhi
+             */
+            state?: string | null;
+            /** Pincode */
+            pincode?: string | null;
+            /**
+             * Group
+             * @description Tally group, default Sundry Debtors
+             */
+            group?: string | null;
+            /**
+             * Make In Tally
+             * @default true
+             */
+            make_in_tally: boolean;
+        };
+        /** DealerCreatedOut */
+        DealerCreatedOut: {
+            dealer: components["schemas"]["DealerOut"];
+            /**
+             * Tally
+             * @description What happened in Tally, in words
+             */
+            tally: string;
+            /** In Tally */
+            in_tally: boolean;
+        };
         /** DealerDetailOut */
         DealerDetailOut: {
             /**
@@ -3145,6 +3329,11 @@ export interface components {
             tally_mobile?: string | null;
             /** Tally Phone */
             tally_phone?: string | null;
+            /**
+             * Pending In Tally
+             * @default false
+             */
+            pending_in_tally: boolean;
             /** Tally Contact Name */
             tally_contact_name?: string | null;
             /** Tally Address */
@@ -3217,6 +3406,11 @@ export interface components {
             tally_mobile?: string | null;
             /** Tally Phone */
             tally_phone?: string | null;
+            /**
+             * Pending In Tally
+             * @default false
+             */
+            pending_in_tally: boolean;
             /** Tally Contact Name */
             tally_contact_name?: string | null;
             /** Tally Address */
@@ -7292,6 +7486,68 @@ export interface operations {
             };
         };
     };
+    create_dealer_api_v1_dealers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DealerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealerCreatedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dealer_tally_groups_api_v1_dealers_tally_groups_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_dealer_api_v1_dealers__dealer_id__get: {
         parameters: {
             query?: never;
@@ -8476,6 +8732,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VehicleLoadOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    factory_truck_numbers_api_v1_dispatch_factory_truck_numbers_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
                 };
             };
             /** @description Validation Error */
@@ -10183,6 +10473,83 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    android_latest_api_v1_app_android_latest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    } | null;
+                };
+            };
+        };
+    };
+    android_download_api_v1_app_android_download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    android_publish_api_v1_app_android_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_android_publish_api_v1_app_android_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

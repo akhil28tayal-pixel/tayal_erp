@@ -32,11 +32,14 @@ def test_tally_upsert_is_idempotent_and_keeps_erp_fields(world, db):
     assert db.execute(select(AuditLog).where(AuditLog.action == "dealer.updated_from_tally")).first()
 
 
-def test_dealers_cannot_be_created_by_hand(world, client):
+def test_dealer_added_by_hand_is_marked_as_made_in_the_erp(world, client):
+    """Added while booking (decision D33): made in Tally too, and marked until Tally has it."""
     c = world.company()
     admin = world.user(c, ["SUPER_ADMIN"])
-    r = client.post("/api/v1/dealers", json={"name": "Manual"}, headers=world.headers(admin, c))
-    assert r.status_code == 405
+    r = client.post("/api/v1/dealers", json={"name": "Manual Traders", "make_in_tally": False},
+                    headers=world.headers(admin, c))
+    assert r.status_code == 201
+    assert r.json()["dealer"]["source"] == "ERP" and r.json()["dealer"]["pending_in_tally"] is True
 
 
 def test_dealer_update_uses_optimistic_locking(world, db, client):

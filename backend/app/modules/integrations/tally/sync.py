@@ -167,13 +167,24 @@ def run_in_background(run_id: uuid.UUID) -> None:
         run = db.get(TallySyncRun, run_id)
         company = db.get(Company, run.company_id)
         _step(db, run, "masters", "RUNNING")
+        made = {"made": [], "failed": []}
         try:
+            try:  # dealers added in the ERP while booking: make their ledgers first, so this sync links them
+                from app.modules.masters import new_dealer
+
+                made = new_dealer.push_pending(db, company.id)
+                db.commit()
+            except Exception:  # noqa: BLE001 - never stops the sync; retried next time
+                db.rollback()
+                traceback.print_exc()
             tally_name, ledgers, godowns, items = fetch(TallyClient(run.tally_url), company)
             summary = apply(db, company, tally_name, ledgers, godowns, items, run.triggered_by)
             save_url(db, company.id, run.tally_url, run.triggered_by)
             summary["steps"] = (run.summary or {}).get("steps")
             run.summary = summary
-            _step(db, run, "masters", "OK", f"{len(ledgers)} customers, {len(godowns)} godowns, {len(items)} items")
+            _step(db, run, "masters", "OK", f"{len(ledgers)} customers, {len(godowns)} godowns, {len(items)} items"
+                  + (f"; new dealers made in Tally: {', '.join(made['made'])}" if made["made"] else "")
+                  + (f"; not made in Tally: {'; '.join(made['failed'])}" if made["failed"] else ""))
             write_audit(db, action="tally.sync", entity_type="tally_sync_runs", entity_id=run.id,
                         actor_id=run.triggered_by, company_id=company.id, after=summary["tally"])
             db.commit()

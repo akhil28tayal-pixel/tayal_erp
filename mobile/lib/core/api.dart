@@ -71,6 +71,36 @@ class ApiClient {
 
   Future<dynamic> delete(String path) => _send(() => _http.delete(_uri(path), headers: _headers()));
 
+  /// Streams a file from the server to disk (app updates), reporting bytes received and the total size.
+  Future<void> download(String path, File to, {void Function(int got, int total)? progress}) async {
+    Future<http.StreamedResponse> go() {
+      final r = http.Request('GET', _uri(path));
+      r.headers.addAll(_headers()..remove('Content-Type'));
+      return _http.send(r);
+    }
+
+    var res = await go().timeout(_timeout);
+    if (res.statusCode == 401 && await refresh()) res = await go().timeout(_timeout);
+    if (res.statusCode != 200) {
+      throw ApiException(res.statusCode, 'DOWNLOAD_FAILED', 'Download failed (${res.statusCode}). Try again.');
+    }
+    final total = res.contentLength ?? 0;
+    var got = 0;
+    final sink = to.openWrite();
+    try {
+      await for (final chunk in res.stream) {
+        sink.add(chunk);
+        got += chunk.length;
+        progress?.call(got, total);
+      }
+    } finally {
+      await sink.close();
+    }
+    if (total > 0 && got != total) {
+      throw ApiException(0, 'DOWNLOAD_FAILED', 'The download was cut off. Try again.');
+    }
+  }
+
   /// Sign in. Mobile keeps the refresh token in the Android Keystore (flutter_secure_storage).
   Future<Map<String, dynamic>> login(String phone, String password, String deviceId) async {
     final res = await _raw(() => _http.post(_uri('/auth/login'),

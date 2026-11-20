@@ -3860,6 +3860,63 @@
       }
     },
     "/api/v1/dealers": {
+      "post": {
+        "tags": [
+          "dealers"
+        ],
+        "summary": "Create Dealer",
+        "description": "Add a dealer that isn't in Tally yet (while booking). It is made as a ledger in Tally too: now if Tally can\nbe reached, otherwise at the next Tally sync.",
+        "operationId": "create_dealer_api_v1_dealers_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Company-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "X-Company-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DealerCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DealerCreatedOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "tags": [
           "dealers"
@@ -3980,6 +4037,59 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Page_DealerOut_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dealers/tally-groups": {
+      "get": {
+        "tags": [
+          "dealers"
+        ],
+        "summary": "Dealer Tally Groups",
+        "description": "Tally groups a new dealer can go under, most used first.",
+        "operationId": "dealer_tally_groups_api_v1_dealers_tally_groups_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Company-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "X-Company-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response Dealer Tally Groups Api V1 Dealers Tally Groups Get"
                 }
               }
             }
@@ -6530,6 +6640,88 @@
                     "$ref": "#/components/schemas/VehicleLoadOut"
                   },
                   "title": "Response Vehicle Loads Api V1 Dispatch Vehicles Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dispatch/factory-truck-numbers": {
+      "get": {
+        "tags": [
+          "dispatch"
+        ],
+        "summary": "Factory Truck Numbers",
+        "description": "Factory truck numbers used before (typed in dispatch or on purchase bills), most recent first, so a\nreturning truck is picked instead of typed again. `q` matches any part of the number (spaces ignored).",
+        "operationId": "factory_truck_numbers_api_v1_dispatch_factory_truck_numbers_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "default": 12,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "X-Company-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "X-Company-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response Factory Truck Numbers Api V1 Dispatch Factory Truck Numbers Get"
                 }
               }
             }
@@ -9945,6 +10137,127 @@
         }
       }
     },
+    "/api/v1/app/android/latest": {
+      "get": {
+        "tags": [
+          "app updates"
+        ],
+        "summary": "Android Latest",
+        "description": "The newest published build, or null when none has been published.",
+        "operationId": "android_latest_api_v1_app_android_latest_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Android Latest Api V1 App Android Latest Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/app/android/download": {
+      "get": {
+        "tags": [
+          "app updates"
+        ],
+        "summary": "Android Download",
+        "operationId": "android_download_api_v1_app_android_download_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/app/android": {
+      "post": {
+        "tags": [
+          "app updates"
+        ],
+        "summary": "Android Publish",
+        "description": "Publish a new build. Its version code (the number after + in pubspec's version) must be higher than the\none already published, or phones would not see it as an update.",
+        "operationId": "android_publish_api_v1_app_android_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Company-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "X-Company-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_android_publish_api_v1_app_android_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Android Publish Api V1 App Android Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -10005,10 +10318,66 @@
             "title": "Override Credit",
             "description": "Admin: approve although the credit check fails",
             "default": false
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ApproveLineIn"
+            },
+            "type": "array",
+            "title": "Lines",
+            "description": "Super admin: change quantity / rate of these lines, then approve"
           }
         },
         "type": "object",
         "title": "ApproveIn"
+      },
+      "ApproveLineIn": {
+        "properties": {
+          "line_no": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Line No"
+          },
+          "qty": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,16}0*$)\\d{0,12}\\.\\d{0,3}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qty",
+            "description": "New quantity, in the unit the line was booked in"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,19}0*$)\\d{0,14}\\.\\d{0,4}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate",
+            "description": "New rate, per the line's rate unit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "line_no"
+        ],
+        "title": "ApproveLineIn"
       },
       "AssignmentBulkIn": {
         "properties": {
@@ -10285,6 +10654,45 @@
           "reason"
         ],
         "title": "BlockIn"
+      },
+      "Body_android_publish_api_v1_app_android_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "version_code": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version Code"
+          },
+          "version_name": {
+            "type": "string",
+            "maxLength": 30,
+            "minLength": 1,
+            "title": "Version Name"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "version_code",
+          "version_name"
+        ],
+        "title": "Body_android_publish_api_v1_app_android_post"
       },
       "Body_upload_api_v1_purchases_upload_post": {
         "properties": {
@@ -12628,6 +13036,149 @@
         ],
         "title": "DealerContactOut"
       },
+      "DealerCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 2,
+            "title": "Name",
+            "description": "As it should appear in Tally"
+          },
+          "mobile": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mobile"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "gstin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\s*([0-9]{2}[A-Za-z0-9]{13})?\\s*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gstin"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State",
+            "description": "Default Delhi"
+          },
+          "pincode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^([0-9]{6})?$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pincode"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group",
+            "description": "Tally group, default Sundry Debtors"
+          },
+          "make_in_tally": {
+            "type": "boolean",
+            "title": "Make In Tally",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DealerCreate",
+        "description": "A dealer that isn't in Tally yet, added while booking. It is also made as a ledger in Tally."
+      },
+      "DealerCreatedOut": {
+        "properties": {
+          "dealer": {
+            "$ref": "#/components/schemas/DealerOut"
+          },
+          "tally": {
+            "type": "string",
+            "title": "Tally",
+            "description": "What happened in Tally, in words"
+          },
+          "in_tally": {
+            "type": "boolean",
+            "title": "In Tally"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dealer",
+          "tally",
+          "in_tally"
+        ],
+        "title": "DealerCreatedOut"
+      },
       "DealerDetailOut": {
         "properties": {
           "id": {
@@ -12819,6 +13370,11 @@
               }
             ],
             "title": "Tally Phone"
+          },
+          "pending_in_tally": {
+            "type": "boolean",
+            "title": "Pending In Tally",
+            "default": false
           },
           "tally_contact_name": {
             "anyOf": [
@@ -13112,6 +13668,11 @@
               }
             ],
             "title": "Tally Phone"
+          },
+          "pending_in_tally": {
+            "type": "boolean",
+            "title": "Pending In Tally",
+            "default": false
           },
           "tally_contact_name": {
             "anyOf": [

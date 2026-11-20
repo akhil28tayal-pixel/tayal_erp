@@ -163,6 +163,47 @@ class Tally:
         return {"ok": False, "error": "; ".join(msgs) or
                 f"Tally did not create the voucher (created={created}, errors={errors}, exceptions={exc})"}
 
+    def create_ledger(self, name: str, parent: str = "Sundry Debtors", mobile: str | None = None,
+                      address: list[str] | None = None, state: str | None = None, pincode: str | None = None,
+                      gstin: str | None = None, contact: str | None = None) -> dict:
+        """Make a party ledger (a new dealer). {"ok": True} if made, or if Tally already has one by that name."""
+        lines = [x.strip() for x in (address or []) if x and x.strip()][:4]
+        addr = "".join(f"<ADDRESS>{_e(x)}</ADDRESS>" for x in lines)
+        reg = "Regular" if gstin else "Unregistered/Consumer"
+        today = dt.date.today().strftime("%Y%m%d")
+        # Both the older tags and TallyPrime 4's newer ones: Tally ignores the ones it doesn't know.
+        led = (f'<LEDGER NAME="{_e(name)}" ACTION="Create"><NAME.LIST><NAME>{_e(name)}</NAME></NAME.LIST>'
+               f"<PARENT>{_e(parent)}</PARENT><ISBILLWISEON>Yes</ISBILLWISEON><AFFECTSSTOCK>No</AFFECTSSTOCK>"
+               + (f"<LEDGERMOBILE>{_e(mobile)}</LEDGERMOBILE>" if mobile else "")
+               + (f"<LEDGERCONTACT>{_e(contact)}</LEDGERCONTACT>" if contact else "")
+               + (f'<ADDRESS.LIST TYPE="String">{addr}</ADDRESS.LIST>' if addr else "")
+               + (f"<LEDSTATENAME>{_e(state)}</LEDSTATENAME>" if state else "")
+               + (f"<PINCODE>{_e(pincode)}</PINCODE>" if pincode else "")
+               + "<COUNTRYNAME>India</COUNTRYNAME><COUNTRYOFRESIDENCE>India</COUNTRYOFRESIDENCE>"
+               + f"<GSTREGISTRATIONTYPE>{reg}</GSTREGISTRATIONTYPE>"
+               + (f"<PARTYGSTIN>{_e(gstin)}</PARTYGSTIN>" if gstin else "")
+               + f'<LEDMAILINGDETAILS.LIST><APPLICABLEFROM>{today}</APPLICABLEFROM><MAILINGNAME>{_e(name)}</MAILINGNAME>'
+               + (f'<ADDRESS.LIST TYPE="String">{addr}</ADDRESS.LIST>' if addr else "")
+               + (f"<STATE>{_e(state)}</STATE>" if state else "") + (f"<PINCODE>{_e(pincode)}</PINCODE>" if pincode else "")
+               + "<COUNTRY>India</COUNTRY></LEDMAILINGDETAILS.LIST>"
+               + f"<LEDGSTREGDETAILS.LIST><APPLICABLEFROM>{today}</APPLICABLEFROM><GSTREGISTRATIONTYPE>{reg}</GSTREGISTRATIONTYPE>"
+               + (f"<STATE>{_e(state)}</STATE>" if state else "") + (f"<GSTIN>{_e(gstin)}</GSTIN>" if gstin else "")
+               + "</LEDGSTREGDETAILS.LIST></LEDGER>")
+        xml = f"""<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA>
+<REQUESTDESC><REPORTNAME>All Masters</REPORTNAME><STATICVARIABLES>
+<SVCURRENTCOMPANY>{_e(self.company)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC>
+<REQUESTDATA><TALLYMESSAGE xmlns:UDF="TallyUDF">{led}</TALLYMESSAGE></REQUESTDATA>
+</IMPORTDATA></BODY></ENVELOPE>"""
+        root = self.post(xml)
+        created = int(root.findtext(".//CREATED") or 0) + int(root.findtext(".//ALTERED") or 0)
+        errors = int(root.findtext(".//ERRORS") or 0)
+        msgs = [e.text.strip() for e in root.iter("LINEERROR") if e.text]
+        if created >= 1 and not errors:
+            return {"ok": True}
+        if any("already exists" in m.lower() for m in msgs):
+            return {"ok": True, "existed": True}
+        return {"ok": False, "error": "; ".join(msgs) or f"Tally did not make the ledger (errors={errors})"}
+
     # ---------- godown-wise stock ----------
     def books_from(self) -> dt.date | None:
         root = self._collection("Company", "Name,BooksFrom,StartingFrom", company=False)

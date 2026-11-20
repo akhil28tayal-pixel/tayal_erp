@@ -53,9 +53,19 @@ class ReasonIn(BaseModel):
     reason: str = Field(min_length=3, max_length=1000)
 
 
+class ApproveLineIn(BaseModel):
+    line_no: int = Field(ge=1)
+    qty: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=3,
+                                description="New quantity, in the unit the line was booked in")
+    rate: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4,
+                                 description="New rate, per the line's rate unit")
+
+
 class ApproveIn(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
     override_credit: bool = Field(default=False, description="Admin: approve although the credit check fails")
+    lines: list[ApproveLineIn] = Field(default_factory=list, description="Super admin: change quantity / rate "
+                                                                         "of these lines, then approve")
 
 
 class PricedLineOut(BaseModel):

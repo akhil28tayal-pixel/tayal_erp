@@ -50,6 +50,7 @@ export default function SettingsPage() {
       <PageHeader title="Business rules" sub={can("admin.settings") ? "Changes apply immediately and are recorded in the audit log." : "Only admins can change these."} />
       {can("tally.view") && <JobsCard admin={can("admin.settings")} />}
       {can("admin.settings") && <WhatsAppCard />}
+      {can("admin.settings") && <PhoneAppCard />}
       <div className="panel">
         <table className="tbl">
           <thead><tr><th>Rule</th><th className="w-72">Value</th></tr></thead>
@@ -176,6 +177,65 @@ type Job = { status: string; started_at: string; finished_at: string | null; det
 const when = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 /** What runs by itself: the automatic Tally sync and the nightly backup. */
+type AppRelease = { version_code: number; version_name: string; notes: string | null; size: number; published_at: string; published_by: string };
+
+/** Phone app updates: the build phones are offered when they open the app. Usually published from the Mac with
+ *  `./run-android.sh publish`; this upload is the same thing by hand. */
+function PhoneAppCard() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const cur = useQuery({ queryKey: ["app-release"],
+    queryFn: () => call(api.GET("/api/v1/app/android/latest")) as Promise<AppRelease | null> });
+  const [file, setFile] = useState<File | null>(null);
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [notes, setNotes] = useState("");
+  const pick = (f: File | null) => {
+    setFile(f);
+    // "TayalERP-0.1.0+7.apk" → version 0.1.0, build 7
+    const m = f?.name.match(/(\d+\.\d+\.\d+)\+(\d+)/);
+    if (m) { setName(m[1]); setCode(m[2]); }
+  };
+  const up = useMutation({
+    mutationFn: () => {
+      const fd = new FormData();
+      fd.append("file", file as File);
+      fd.append("version_code", code);
+      fd.append("version_name", name);
+      if (notes.trim()) fd.append("notes", notes.trim());
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return call(api.POST("/api/v1/app/android", { body: fd as any }));
+    },
+    onSuccess: () => { toast("ok", `Version ${name} published. Phones are offered it when they next open the app.`);
+      setFile(null); setNotes(""); qc.invalidateQueries({ queryKey: ["app-release"] }); },
+    onError: (e) => toast("bad", e instanceof ApiError ? e.problem.detail : String(e)),
+  });
+  const c = cur.data;
+  const nextCode = c ? c.version_code + 1 : 1;
+  return (
+    <section className="panel mb-5 p-4">
+      <h2 className="display text-[15px] font-bold">Phone app</h2>
+      <p className="mt-1 text-[13px] text-steel">
+        {c ? <>Published: <b className="text-ink">version {c.version_name}</b> (build {c.version_code}),{" "}
+          {new Date(c.published_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} by {c.published_by}
+          {c.notes ? ` · ${c.notes}` : ""}. Phones with an older build are offered the update when they open the app.</>
+          : "No version published yet. Once one is, phones offer the update when they open the app."}
+      </p>
+      <p className="mt-1 text-[12.5px] text-steel">Usually done from the Mac: <code>./run-android.sh publish</code>. Or upload the APK here:</p>
+      <div className="mt-3 flex flex-wrap items-end gap-2 text-[13px]">
+        <input type="file" accept=".apk,application/vnd.android.package-archive" aria-label="APK file"
+               onChange={(e) => pick(e.target.files?.[0] ?? null)} />
+        <label className="text-steel">Version <input className="input mt-0.5 h-9 w-24" value={name} placeholder="0.1.0" onChange={(e) => setName(e.target.value)} /></label>
+        <label className="text-steel">Build no. <input className="input num mt-0.5 h-9 w-20" inputMode="numeric" value={code} placeholder={String(nextCode)} onChange={(e) => setCode(e.target.value)} /></label>
+        <label className="grow text-steel">What changed <input className="input mt-0.5 h-9 w-full" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+        <button className="btn-primary h-9" disabled={!file || !name || !(Number(code) >= nextCode) || up.isPending} onClick={() => up.mutate()}>
+          {up.isPending ? "Uploading…" : "Publish"}</button>
+      </div>
+      {code && Number(code) < nextCode && <p className="mt-1 text-[12.5px] text-bad">The build number must be at least {nextCode}: set the number after + in pubspec.yaml&apos;s version and build again.</p>}
+    </section>
+  );
+}
+
 function JobsCard({ admin }: { admin: boolean }) {
   const toast = useToast();
   const qc = useQueryClient();
