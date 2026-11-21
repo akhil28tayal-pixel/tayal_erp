@@ -10,6 +10,7 @@
   python -m app.cli export-dealer-contacts [--file dealer_mobiles.json]
   python -m app.cli import-dealer-contacts --file dealer_mobiles.json [--dry-run]
                                                    copy dealers' mobile numbers from one ERP to another
+  python -m app.cli tally-sale --order ITD/SO/2627/000026   what was sent to Tally for an order, and Tally's answer
   python -m app.cli reset-data --keep-phone 98xxxxxxxx [--keep-masters]
                                                    wipe the data and start again (backup first; NOT idempotent)
 
@@ -388,6 +389,25 @@ def import_dealer_contacts(db: Session, path: str, dry_run: bool) -> None:
         print("Dry run: nothing saved. Run again without --dry-run to save.")
 
 
+def show_tally_sale(db: Session, order_no: str) -> None:
+    """Print the sales voucher sent to Tally for one order (status, Tally's message and the XML)."""
+    from app.modules.integrations.tally.models import TallySale
+    from app.modules.orders.models import SalesOrder
+
+    order = db.execute(select(SalesOrder).where(SalesOrder.order_no == order_no.strip())).scalar_one_or_none()
+    if order is None:
+        sys.exit(f"no order {order_no}")
+    s = db.execute(select(TallySale).where(TallySale.order_id == order.id)).scalar_one_or_none()
+    if s is None:
+        sys.exit(f"{order_no} has not been queued for Tally")
+    print(f"order {order_no}  status {s.status}  attempts {s.attempts}  amount {s.amount}")
+    print(f"Tally said: {s.error or '-'}")
+    for it in order.items:
+        print(f"  line {it.line_no}: product {it.product_id}  ordered {it.base_qty}  delivered {it.qty_delivered_base}")
+    print("---- voucher XML sent ----")
+    print(s.xml or "(none)")
+
+
 def seed_demo(db: Session) -> None:
     """Fake data in its own company. It never touches Ishika Traders Daily."""
     demo = _get_or_create(db, Company, {"code": "DEMO"}, legal_name="DEMO Trading Co (sample data)",
@@ -648,6 +668,8 @@ def main(argv: list[str] | None = None) -> None:
     imp = sub.add_parser("import-dealer-contacts", help="add dealers' mobile numbers from export-dealer-contacts")
     imp.add_argument("--file", required=True)
     imp.add_argument("--dry-run", action="store_true", help="show what would be added, save nothing")
+    ts = sub.add_parser("tally-sale", help="show the sales voucher sent to Tally for an order")
+    ts.add_argument("--order", required=True)
     rst = sub.add_parser("reset-data", help="wipe orders, trucks, messages, logs and all users but one super admin")
     rst.add_argument("--keep-phone", required=True, help="the super admin who stays")
     rst.add_argument("--keep-masters", action="store_true", help="keep dealers, godowns, rates, trucks, drivers, staff")
@@ -685,6 +707,8 @@ def main(argv: list[str] | None = None) -> None:
             export_dealer_contacts(db, args.file)
         elif args.cmd == "import-dealer-contacts":
             import_dealer_contacts(db, args.file, args.dry_run)
+        elif args.cmd == "tally-sale":
+            show_tally_sale(db, args.order)
         elif args.cmd == "reset-data":
             reset_data(db, args.keep_phone, args.keep_masters, args.yes, args.no_backup)
         elif args.cmd == "reset-password":

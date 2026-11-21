@@ -58,12 +58,23 @@ def queue(db: Session, order: SalesOrder) -> TallySale | None:
 
 
 # ---------------------------------------------------------------- voucher
-def build(db: Session, order: SalesOrder, units: dict[str, str], sales_ledger: str, vtype: str) -> tuple[str, Decimal, dt.date]:
-    """(voucher XML, total, voucher date) for what was actually delivered on this order."""
+def build(db: Session, order: SalesOrder, units: dict[str, str], sales_ledger: str, vtype: str,
+          tally_godowns: list[str] | None = None, tally_ledgers: list[str] | None = None,
+          ) -> tuple[str, Decimal, dt.date]:
+    """(voucher XML, total, voucher date) for what was actually delivered on this order.
+
+    Every stock item and godown named must exist in Tally: TallyPrime files a voucher that names one it doesn't
+    have under Exceptions, without its items. So a missing one stops the send with a clear message instead."""
     from app.modules.dispatch.models import DeliveryOrder, DeliveryOrderItem
 
     dealer = db.get(Dealer, order.dealer_id)
     party = dealer.tally_ledger_name or dealer.name
+    if tally_ledgers:
+        real = next((x for x in tally_ledgers if x.lower() == party.lower()), None)
+        if real is None:
+            raise ValueError(f"Dealer “{party}” has no ledger in Tally yet. Sync with Tally (a dealer added in the "
+                             "ERP is made in Tally then), then send again.")
+        party = real
     rows = db.execute(
         select(DeliveryOrderItem, DeliveryOrder).join(DeliveryOrder, DeliveryOrder.id == DeliveryOrderItem.do_id)
         .where(DeliveryOrder.sales_order_id == order.id, DeliveryOrder.status.in_(SETTLED))).all()
@@ -88,7 +99,13 @@ def build(db: Session, order: SalesOrder, units: dict[str, str], sales_ledger: s
         cp = db.get(CompanyProduct, (order.company_id, oi.product_id))
         product = db.get(Product, oi.product_id)
         item = (cp.tally_stock_item_name if cp else None) or product.name
-        unit = units.get(item) or units.get(next((k for k in units if k.lower() == item.lower()), ""), "")
+        if units:
+            real = next((k for k in units if k.lower() == item.lower()), None)
+            if real is None:
+                raise ValueError(f"“{item}” is not a stock item in Tally. On the Products page, link {product.name} "
+                                 "to its Tally stock item (or sync with Tally), then send again.")
+            item = real
+        unit = units.get(item, "")
         tally_uom = map_unit(unit)
         delivered = sum(by_godown.values(), Decimal(0))
         # amount at the order's rate for what was delivered
@@ -96,6 +113,13 @@ def build(db: Session, order: SalesOrder, units: dict[str, str], sales_ledger: s
         qty_total = _in_tally_unit(db, oi, product, tally_uom, delivered)
         rate = (amount / qty_total).quantize(Decimal("0.0001")) if qty_total else Decimal(0)
         batches = ""
+        if tally_godowns:
+            known = {x.lower(): x for x in tally_godowns}
+            missing = [g for g in by_godown if g.lower() not in known]
+            if missing:
+                raise ValueError(f"Godown “{missing[0]}” is not in Tally. Fix its Tally name on the Godowns page "
+                                 "(or sync with Tally), then send again.")
+            by_godown = {known[g.lower()]: q for g, q in by_godown.items()}
         for g, base in by_godown.items():
             q = _in_tally_unit(db, oi, product, tally_uom, base)
             a = (amount * base / delivered).quantize(CENT, ROUND_HALF_UP)
@@ -112,10 +136,12 @@ def build(db: Session, order: SalesOrder, units: dict[str, str], sales_ledger: s
 </ALLINVENTORYENTRIES.LIST>
 """
         total += amount
+    if not inv_xml or total <= 0:  # never send a voucher with only the dealer's side (Tally lists it as an exception)
+        raise ValueError("No delivered quantity with a value on this order, so there is nothing to bill in Tally")
     ref = order.order_no or str(order.id)
-    narr = f"ERP order {ref} · delivered by {', '.join(sorted(set(trucks)))}"
+    narr = f"ERP order {ref} - delivered by {', '.join(sorted(set(trucks)))}"
     if order.site_name:
-        narr += f" · site {order.site_name}"
+        narr += f" - site {order.site_name}"
     xml = f"""<VOUCHER VCHTYPE="{_e(vtype)}" ACTION="Create" OBJVIEW="Invoice Voucher View">
 <DATE>{day:%Y%m%d}</DATE><EFFECTIVEDATE>{day:%Y%m%d}</EFFECTIVEDATE><VOUCHERTYPENAME>{_e(vtype)}</VOUCHERTYPENAME>
 <REFERENCE>{_e(ref)}</REFERENCE><REFERENCEDATE>{day:%Y%m%d}</REFERENCEDATE>
@@ -193,14 +219,19 @@ def push_pending(db: Session, company_id: uuid.UUID, actor_id=None, ids: list[uu
         order = db.get(SalesOrder, s.order_id)
         s.attempts += 1
         try:
-            xml, total, day = build(db, order, units, ledger, vtype)
+            xml, total, day = build(db, order, units, ledger, vtype,
+                                    [g["name"] if isinstance(g, dict) else str(g) for g in m.get("godowns") or []],
+                                    [x["name"] for x in m["ledgers"]])
             s.xml, s.amount = xml, f"{total:.2f}"
             s.voucher_date = datetime.combine(day, dt.time(12), IST)
             r = c.import_voucher(xml)
         except (tally_io.TallyError, ValueError) as e:
             r = {"ok": False, "error": str(e)}
         if r["ok"]:
-            s.status, s.error, s.tally_master_id, s.pushed_at = "WAITING_APPROVAL", None, r.get("vchid") or None, now()
+            # Made in Tally. With a warning it is under Tally's Exceptions: fix or delete it there; it is never sent
+            # again by itself (that would make a second voucher).
+            s.status, s.error, s.tally_master_id, s.pushed_at = ("WAITING_APPROVAL", r.get("warning"),
+                                                                 r.get("vchid") or None, now())
             done += 1
         else:
             s.status, s.error = "FAILED", r["error"]

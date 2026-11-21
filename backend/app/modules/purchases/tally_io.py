@@ -160,6 +160,9 @@ class Tally:
         msgs = [e.text.strip() for e in root.iter("LINEERROR") if e.text]
         if created >= 1 and not errors and not exc:
             return {"ok": True, "vchid": root.findtext(".//LASTVCHID") or ""}
+        if created >= 1:  # it IS in Tally (sending again would make a second one), but Tally flagged a problem
+            return {"ok": True, "vchid": root.findtext(".//LASTVCHID") or "", "warning": "; ".join(msgs) or
+                    f"Tally made the voucher but put it under Exceptions (errors={errors}, exceptions={exc})"}
         return {"ok": False, "error": "; ".join(msgs) or
                 f"Tally did not create the voucher (created={created}, errors={errors}, exceptions={exc})"}
 

@@ -1,8 +1,7 @@
 name: tayal_erp
 description: Tayal ERP field app (sales, collection, godown and driver staff).
 publish_to: "none"
-version: 0.1.0+1
-
+version: 0.1.0+3
 environment:
   sdk: ">=3.6.0 <4.0.0"   # Flutter 3.27 or newer
 

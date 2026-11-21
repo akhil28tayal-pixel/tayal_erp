@@ -15,7 +15,8 @@ from tests.test_orders_dispatch import API, Shop
 class FakeTally:
     imported: list = []
     in_tally: list = []  # what a Voucher export returns: dicts with ref, optional, number
-    ledgers = [{"name": "Sales", "parent": "Sales Accounts"}, {"name": "Cash", "parent": "Cash-in-Hand"}]
+    ledgers = [{"name": "Sales", "parent": "Sales Accounts"}, {"name": "Cash", "parent": "Cash-in-Hand"},
+               {"name": "Sharma Building Material", "parent": "Sundry Debtors"}]
     fail: str | None = None
 
     def __init__(self, url, company="", timeout=60):
@@ -40,7 +41,8 @@ class FakeTally:
 def shop(world, monkeypatch):
     monkeypatch.setattr(tally_io, "Tally", FakeTally)
     FakeTally.imported, FakeTally.in_tally, FakeTally.fail = [], [], None
-    FakeTally.ledgers = [{"name": "Sales", "parent": "Sales Accounts"}, {"name": "Cash", "parent": "Cash-in-Hand"}]
+    FakeTally.ledgers = [{"name": "Sales", "parent": "Sales Accounts"}, {"name": "Cash", "parent": "Cash-in-Hand"},
+                         {"name": "Sharma Building Material", "parent": "Sundry Debtors"}]
     monkeypatch.setattr(psvc, "UPLOADER_DIR", __import__("pathlib").Path("/nonexistent"))
     s = Shop(world)
     from app.modules.platform.models import SystemSetting
@@ -107,7 +109,8 @@ def test_deleted_in_tally_is_rejected_and_can_be_sent_again(shop):
 
 
 def test_failure_is_kept_and_retried(shop):
-    FakeTally.ledgers = [{"name": "Sales A", "parent": "Sales Accounts"}, {"name": "Sales B", "parent": "Sales Accounts"}]
+    FakeTally.ledgers = [{"name": "Sales A", "parent": "Sales Accounts"}, {"name": "Sales B", "parent": "Sales Accounts"},
+                         {"name": "Sharma Building Material", "parent": "Sundry Debtors"}]
     o = deliver_order(shop)
     assert o["tally_status"] == "FAILED" and "sales ledger" in o["tally_note"]
     # choose the ledger, then retry
@@ -137,3 +140,59 @@ def test_shortage_and_closed_orders_send_only_what_was_delivered(shop):
     assert o["tally_status"] == "WAITING_APPROVAL" and "<ACTUALQTY> 250 Bag</ACTUALQTY>" in FakeTally.imported[-1]
     # Sales people cannot push
     assert shop.post(shop.sales, "/tally/sales/push", {"ids": None}).status_code == 403
+
+
+def test_voucher_made_with_exceptions_is_not_sent_again():
+    """Tally made it but listed it under Exceptions: it is in Tally, so resending would make a duplicate."""
+    t = tally_io.Tally.__new__(tally_io.Tally)
+    t.company = "ITD"
+    t.post = lambda xml, timeout=None: ET.fromstring(
+        "<ENVELOPE><BODY><DATA><IMPORTRESULT><CREATED>1</CREATED><ERRORS>0</ERRORS><EXCEPTIONS>1</EXCEPTIONS>"
+        "<LASTVCHID>77</LASTVCHID></IMPORTRESULT></DATA></BODY></ENVELOPE>")
+    r = t.import_voucher("<VOUCHER/>")
+    assert r["ok"] is True and r["vchid"] == "77" and "Exceptions" in r["warning"]
+    t.post = lambda xml, timeout=None: ET.fromstring(
+        "<ENVELOPE><CREATED>0</CREATED><ERRORS>1</ERRORS><LINEERROR>Stock Item 'X' does not exist</LINEERROR></ENVELOPE>")
+    assert t.import_voucher("<VOUCHER/>") == {"ok": False, "error": "Stock Item 'X' does not exist"}
+
+
+def test_exception_voucher_waits_and_the_sync_does_not_resend_it(shop, monkeypatch):
+    def made_with_warning(self, xml):
+        FakeTally.imported.append(xml)
+        return {"ok": True, "vchid": "901", "warning": "Tally made the voucher but put it under Exceptions"}
+    monkeypatch.setattr(FakeTally, "import_voucher", made_with_warning)
+    o = deliver_order(shop, bags="100", split=("100",))
+    assert o["tally_status"] == "WAITING_APPROVAL" and "Exceptions" in o["tally_note"]
+    from app.modules.integrations.tally.sync import _sales_push
+
+    assert _sales_push(shop.db, shop.co.id, None) == ("OK", "Nothing to send")
+    assert len(FakeTally.imported) == 1
+
+
+def test_nothing_delivered_is_never_sent_as_an_empty_voucher(shop):
+    o = shop.post(shop.ops, f"/orders/{shop.order(shop.sales, bags='100').json()['id']}/approve", {}).json()
+    d = shop.post(shop.ops, "/delivery-orders", {
+        "sales_order_id": o["id"], "godown_id": str(shop.g1.id), "vehicle_id": str(shop.truck.id),
+        "driver_id": str(shop.driver.id), "send_now": True,
+        "lines": [{"order_item_id": o["items"][0]["id"], "qty": "100"}]}).json()
+    r = shop.post(shop.ops, f"/delivery-orders/{d['id']}/deliver", {"recipient_name": "Site", "close_rest": True,
+                  "lines": [{"do_item_id": d["items"][0]["id"], "delivered_qty": "0", "returned_qty": "100"}]})
+    assert r.status_code == 200, r.text
+    assert FakeTally.imported == []  # nothing billed, nothing sent
+
+
+def test_item_or_dealer_missing_in_tally_is_not_sent(shop, monkeypatch):
+    """TallyPrime would file it under Exceptions without its items: stop with a clear message instead."""
+    monkeypatch.setattr(FakeTally, "masters", lambda self: {"ledgers": FakeTally.ledgers, "godowns": [],
+                                                            "items": [{"name": "Ambuja PPC 50kg", "unit": "Bag"}]})
+    o = deliver_order(shop, bags="100", split=("100",))
+    assert o["tally_status"] == "FAILED" and "is not a stock item in Tally" in o["tally_note"]
+    assert FakeTally.imported == []
+    FakeTally.ledgers = [x for x in FakeTally.ledgers if x["parent"] != "Sundry Debtors"]
+    monkeypatch.setattr(FakeTally, "masters", lambda self: {"ledgers": FakeTally.ledgers, "godowns": [],
+                                                            "items": [{"name": "Ambuja", "unit": "Bag"}]})
+    from app.modules.integrations.tally.sync import _sales_push
+
+    assert _sales_push(shop.db, shop.co.id, None)[0] == "FAILED"
+    sale = shop.db.execute(select(TallySale)).scalar_one()
+    assert "has no ledger in Tally" in sale.error and FakeTally.imported == []

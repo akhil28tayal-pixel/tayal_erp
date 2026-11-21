@@ -135,7 +135,7 @@ def order_out(db: Session, ctx: Ctx, o: SalesOrder) -> dict:
         "can": service.allowed_actions(db, ctx, o),
         "credit_now": credit_now,
         "tally_status": tally.status if tally else None,
-        "tally_note": (tally.error if tally and tally.status in ("FAILED", "REJECTED") else
+        "tally_note": (tally.error if tally and (tally.status in ("FAILED", "REJECTED") or tally.error) else
                        (f"Tally voucher {tally.tally_voucher_no}" if tally and tally.tally_voucher_no else None)),
     }
 
